@@ -19,7 +19,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.project.blue_command.logic.CommandController
-import com.project.blue_command.model.TacticalCommand
+import com.project.blue_command.model.Command
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
@@ -37,14 +37,14 @@ fun CommandScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        items(TacticalCommand.entries.toTypedArray()) {command ->
+        items(Command.entries.toTypedArray()) { command ->
             CommandTitle(command = command, controller = controller)
         }
     }
 }
 
 @Composable
-fun CommandTitle(command: TacticalCommand, controller: CommandController) {
+fun CommandTitle(command: Command, controller: CommandController) {
     Card(
         modifier = Modifier
             .aspectRatio(1f)

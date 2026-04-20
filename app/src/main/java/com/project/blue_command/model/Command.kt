@@ -1,6 +1,6 @@
 package com.project.blue_command.model
 
-enum class TacticalCommand(val code: Int, val label: String) {
+enum class Command(val code: Int, val label: String) {
     HURRY_UP(1, "Hurry Up"),
     STOP(2, "Stop"),
     FREEZE(3, "Freeze"),
