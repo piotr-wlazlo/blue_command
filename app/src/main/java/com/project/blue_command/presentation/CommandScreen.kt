@@ -3,52 +3,40 @@ package com.project.blue_command.presentation
 import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.project.blue_command.R
 import com.project.blue_command.logic.CommandController
 import com.project.blue_command.model.TacticalCommand
 
 @Composable
 fun CommandScreen(
-    controller: CommandController = viewModel()
+    controller: CommandController = viewModel(),
+    onCommandChosen: ((TacticalCommand) -> Unit)? = null
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val commands = TacticalCommand.entries.toTypedArray()
     val columnCount = if (isLandscape) 6 else 3
-    val rowCount = commands.size / columnCount
+    val rowCount = (commands.size + columnCount - 1) / columnCount
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.blue_command_logo_2),
-            contentDescription = "Blue Command Logo",
-            modifier = Modifier
-                .fillMaxWidth(0.5f)
-                .padding(bottom = 8.dp)
-                .wrapContentHeight(),
-            contentScale = ContentScale.Fit
-        )
-
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -66,6 +54,7 @@ fun CommandScreen(
                             CommandTitle(
                                 command = commands[index],
                                 controller = controller,
+                                onCommandChosen = onCommandChosen,
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
@@ -82,16 +71,18 @@ fun CommandScreen(
 fun CommandTitle(
     command: TacticalCommand,
     controller: CommandController,
+    onCommandChosen: ((TacticalCommand) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier
             .clickable {
                 controller.onCommandSelected(command)
+                onCommandChosen?.invoke(command)
             },
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFF000080)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Box(
             modifier = Modifier
