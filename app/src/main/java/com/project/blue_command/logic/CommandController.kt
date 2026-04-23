@@ -1,13 +1,13 @@
 package com.project.blue_command.logic
 
 import androidx.lifecycle.ViewModel
-import com.project.blue_command.model.Command
+import com.project.blue_command.model.TacticalCommand
 import com.project.blue_command.security.EncryptionManager
 
 class CommandController: ViewModel() {
     private val encryptionManager = EncryptionManager()
 
-    fun onCommandSelected(command: Command) {
+    fun onCommandSelected(command: TacticalCommand) {
         val rawCommand = "${command.code}, ${command.label}"
         val encryptedCommand = encryptionManager.encrypt(rawCommand)
         val decryptedCommand = encryptionManager.decrypt(encryptedCommand)
