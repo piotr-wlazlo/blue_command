@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.project.blue_command.logic.CommandController
@@ -35,31 +34,28 @@ fun CommandScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            for (row in 0 until rowCount) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    for (col in 0 until columnCount) {
-                        val index = row * columnCount + col
-                        if (index < commands.size) {
-                            CommandTitle(
-                                command = commands[index],
-                                controller = controller,
-                                onCommandChosen = onCommandChosen,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                            )
-                        }
+        for (row in 0 until rowCount) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                for (col in 0 until columnCount) {
+                    val index = row * columnCount + col
+                    if (index < commands.size) {
+                        CommandTitle(
+                            command = commands[index],
+                            controller = controller,
+                            onCommandChosen = onCommandChosen,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
                     }
                 }
             }
@@ -77,7 +73,7 @@ fun CommandTitle(
     Card(
         modifier = modifier
             .clickable {
-                controller.onCommandSelected(command)
+                controller.sendCommand(command)
                 onCommandChosen?.invoke(command)
             },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -98,10 +94,4 @@ fun CommandTitle(
             )
         }
     }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewCommandScreen() {
-    CommandScreen()
 }

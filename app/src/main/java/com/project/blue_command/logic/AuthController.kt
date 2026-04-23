@@ -37,6 +37,13 @@ class AuthController : ViewModel() {
         private set
 
     init {
+        groups.add(
+            CombatGroup(
+                id = "ALFA-1234-5678-9012",
+                name = "Oddział Alfa (Demo)",
+                memberIds = mutableListOf("u-soldier-1", "u-soldier-2", "u-soldier-3")
+            )
+        )
         commandFeed.addAll(
             listOf(
                 CommandMessage(

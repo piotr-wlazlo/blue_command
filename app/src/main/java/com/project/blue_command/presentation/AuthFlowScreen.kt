@@ -42,6 +42,10 @@ import com.project.blue_command.model.UserRole
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.runtime.collectAsState
+import com.project.blue_command.logic.CommandController
+import androidx.compose.runtime.LaunchedEffect
+
 
 @Composable
 fun AuthFlowScreen(authController: AuthController = viewModel()) {
@@ -132,29 +136,33 @@ private fun LoginScreen(authController: AuthController) {
 }
 
 @Composable
-private fun SoldierScreen(authController: AuthController) {
+private fun SoldierScreen(authController: AuthController, commandController: CommandController = viewModel()) {
     val user = authController.currentUser ?: return
     val assignedDevice = authController.getDeviceAssignedToSoldier(user.id)
+
+    val myGroup = authController.groups.firstOrNull { it.memberIds.contains(user.id) }
     var selectedSoldierView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
+    val receivedBleCommands by commandController.receivedCommands.collectAsState()
+
+    LaunchedEffect(myGroup?.id) {
+        commandController.setActiveGroup(myGroup?.id)
+    }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 4.dp)
+        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp)
     ) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
                     Text("Rola: SOLDIER", style = MaterialTheme.typography.titleMedium)
                     Text("Uzytkownik: ${user.username}")
                     Text(
-                        text = "Przypisane urzadzenie: ${assignedDevice?.name ?: "brak"}",
-                        style = MaterialTheme.typography.bodyMedium
+                        text = "Oddział: ${myGroup?.name ?: "BRAK PRZYDZIAŁU!"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (myGroup == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                     )
                 }
                 Button(onClick = { authController.logout() }) {
@@ -168,55 +176,35 @@ private fun SoldierScreen(authController: AuthController) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val isCommandsSelected = selectedSoldierView == SoldierMainView.COMMANDS
                 Button(
                     onClick = { selectedSoldierView = SoldierMainView.COMMANDS },
                     modifier = Modifier.weight(1f),
-                    colors = if (isCommandsSelected) {
-                        androidx.compose.material3.ButtonDefaults.buttonColors()
-                    } else {
-                        androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
-                    }
-                ) {
-                    Text("Komendy")
-                }
+                    colors = if (isCommandsSelected) androidx.compose.material3.ButtonDefaults.buttonColors()
+                    else androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+                ) { Text("Komendy") }
+
                 val isInboxSelected = selectedSoldierView == SoldierMainView.INBOX
                 Button(
                     onClick = { selectedSoldierView = SoldierMainView.INBOX },
                     modifier = Modifier.weight(1f),
-                    colors = if (isInboxSelected) {
-                        androidx.compose.material3.ButtonDefaults.buttonColors()
-                    } else {
-                        androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
-                    }
-                ) {
-                    Text("Odebrane komendy")
-                }
+                    colors = if (isInboxSelected) androidx.compose.material3.ButtonDefaults.buttonColors()
+                    else androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+                ) { Text("Odebrane") }
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiary)
         ) {
             Box(modifier = Modifier.padding(4.dp)) {
                 when (selectedSoldierView) {
-                    SoldierMainView.COMMANDS -> {
-                        CommandScreen(onCommandChosen = { command ->
-                            authController.sendCommand(command)
-                        })
-                    }
-
-                    SoldierMainView.INBOX -> {
-                        CommandsInboxScreen(messages = authController.getCommandsFromOthers())
-                    }
+                    SoldierMainView.COMMANDS -> CommandScreen(controller = commandController)
+                    SoldierMainView.INBOX -> CommandsInboxScreen(messages = receivedBleCommands)
                 }
             }
         }
@@ -395,47 +383,66 @@ private fun GroupDetailsScreen(
     authController: AuthController,
     group: CombatGroup,
     onBack: () -> Unit,
-    onManageGroup: () -> Unit
+    onManageGroup: () -> Unit,
+    commandController: CommandController = viewModel()
 ) {
+    var selectedView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
+    val receivedBleCommands by commandController.receivedCommands.collectAsState()
+
+    LaunchedEffect(group.id) {
+        commandController.setActiveGroup(group.id)
+    }
+
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            TextButton(onClick = onBack) {
-                Text("Powrot")
-            }
-            Button(onClick = { authController.logout() }) {
-                Text("Wyloguj")
-            }
+            TextButton(onClick = onBack) { Text("Powrot") }
+            Button(onClick = { authController.logout() }) { Text("Wyloguj") }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = "Grupa: ${group.name}",
-                    style = MaterialTheme.typography.titleSmall
-                )
+                Text("Nasłuch radiowy: ${group.name}", style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.height(6.dp))
-                Button(
-                    onClick = onManageGroup,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Zarzadzaj grupa")
-                }
+                Button(onClick = onManageGroup, modifier = Modifier.fillMaxWidth()) { Text("Zarzadzaj grupa") }
             }
         }
 
-        Card(
+        Row(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { selectedView = SoldierMainView.COMMANDS },
+                modifier = Modifier.weight(1f),
+                colors = if (selectedView == SoldierMainView.COMMANDS) androidx.compose.material3.ButtonDefaults.buttonColors()
+                else androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+            ) { Text("Komendy") }
+
+            Button(
+                onClick = { selectedView = SoldierMainView.INBOX },
+                modifier = Modifier.weight(1f),
+                colors = if (selectedView == SoldierMainView.INBOX) androidx.compose.material3.ButtonDefaults.buttonColors()
+                else androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+            ) { Text("Odebrane") }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth().weight(1f),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiary)
         ) {
-            Box(modifier = Modifier.padding(4.dp)) { CommandScreen() }
+            Box(modifier = Modifier.padding(4.dp)) {
+                if (selectedView == SoldierMainView.COMMANDS) {
+                    CommandScreen(controller = commandController)
+                } else {
+                    CommandsInboxScreen(messages = receivedBleCommands)
+                }
+            }
         }
     }
 }

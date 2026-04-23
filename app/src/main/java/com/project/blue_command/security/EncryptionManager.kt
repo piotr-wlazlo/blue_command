@@ -10,6 +10,18 @@ class EncryptionManager {
     private val keyString = "abcdefgh12345678"
     private val keySpec = SecretKeySpec(keyString.toByteArray(), "AES")
     private val transformation = "AES/CBC/PKCS5Padding"
+    private val secretKey: Byte = 0x5A
+
+    fun encryptToBytes(commandCode: Int): ByteArray {
+        val encryptedByte = (commandCode.toByte().toInt() xor secretKey.toInt()).toByte()
+        return byteArrayOf(encryptedByte)
+    }
+
+    fun decryptFromBytes(data: ByteArray): Int? {
+        if (data.isEmpty()) return null
+        val decryptedByte = (data[0].toInt() xor secretKey.toInt()).toByte()
+        return decryptedByte.toInt()
+    }
 
     fun encrypt(command: String): String {
         val cipher = Cipher.getInstance(transformation)
