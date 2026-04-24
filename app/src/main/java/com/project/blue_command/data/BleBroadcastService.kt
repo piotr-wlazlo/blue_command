@@ -43,15 +43,28 @@ class BleBroadcastService(context: Context) : TacticalRadio {
             }
         }
 
-        scanner?.startScan(listOf(filter), settings, activeScanCallback)
-        println("BLE ODBIORNIK: Rozpoczęto fizyczne nasłuchiwanie dla grupy: $groupId")
+        try {
+            scanner?.startScan(listOf(filter), settings, activeScanCallback)
+            println("BLE ODBIORNIK: Rozpoczęto fizyczne nasłuchiwanie dla grupy: $groupId")
+        } catch (exception: SecurityException) {
+            activeScanCallback = null
+            println("BLE ODBIORNIK: Brak wymaganych uprawnien Bluetooth do nasluchu.")
+        } catch (exception: IllegalStateException) {
+            activeScanCallback = null
+            println("BLE ODBIORNIK: Nie mozna uruchomic nasluchu BLE w tym stanie urzadzenia.")
+        }
     }
 
     override fun stopListening() {
         activeScanCallback?.let {
-            scanner?.stopScan(it)
-            activeScanCallback = null
-            println("BLE ODBIORNIK: Zatrzymano nasłuchiwanie.")
+            try {
+                scanner?.stopScan(it)
+                println("BLE ODBIORNIK: Zatrzymano nasluchiwanie.")
+            } catch (exception: SecurityException) {
+                println("BLE ODBIORNIK: Brak wymaganych uprawnien Bluetooth do zatrzymania nasluchu.")
+            } finally {
+                activeScanCallback = null
+            }
         }
     }
 
@@ -70,10 +83,16 @@ class BleBroadcastService(context: Context) : TacticalRadio {
 
         val callback = object : AdvertiseCallback() {}
 
-        println("BLE NADAJNIK: Rozpoczęto fizyczne nadawanie.")
-        advertiser?.startAdvertising(settings, data, callback)
-        delay(2000)
-        advertiser?.stopAdvertising(callback)
-        println("BLE NADAJNIK: Zakończono nadawanie.")
+        try {
+            println("BLE NADAJNIK: Rozpoczeto fizyczne nadawanie.")
+            advertiser?.startAdvertising(settings, data, callback)
+            delay(2000)
+            advertiser?.stopAdvertising(callback)
+            println("BLE NADAJNIK: Zakonczono nadawanie.")
+        } catch (exception: SecurityException) {
+            println("BLE NADAJNIK: Brak wymaganych uprawnien Bluetooth do nadawania.")
+        } catch (exception: IllegalStateException) {
+            println("BLE NADAJNIK: Nie mozna uruchomic nadawania BLE w tym stanie urzadzenia.")
+        }
     }
 }

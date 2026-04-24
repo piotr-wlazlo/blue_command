@@ -22,13 +22,16 @@ import com.project.blue_command.model.TacticalCommand
 @Composable
 fun CommandScreen(
     controller: CommandController = viewModel(),
+    availableCommands: List<TacticalCommand> = TacticalCommand.entries,
     onCommandChosen: ((TacticalCommand) -> Unit)? = null
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val commands = TacticalCommand.entries.toTypedArray()
+    val commands = availableCommands.toTypedArray()
     val columnCount = if (isLandscape) 6 else 3
-    val rowCount = (commands.size + columnCount - 1) / columnCount
+    val baseCommandsCount = TacticalCommand.entries.size
+    val rowCount = (baseCommandsCount + columnCount - 1) / columnCount
+    val totalSlots = rowCount * columnCount
 
     Column(
         modifier = Modifier
@@ -45,7 +48,7 @@ fun CommandScreen(
             ) {
                 for (col in 0 until columnCount) {
                     val index = row * columnCount + col
-                    if (index < commands.size) {
+                    if (index < commands.size && index < totalSlots) {
                         CommandTitle(
                             command = commands[index],
                             controller = controller,
