@@ -38,7 +38,6 @@ fun CommanderScreen(authController: AuthController) {
     var newGroupName by remember { mutableStateOf("") }
     var selectedGroupId by remember { mutableStateOf<String?>(null) }
     var isManageMode by remember { mutableStateOf(false) }
-
     val selectedGroup = selectedGroupId?.let { authController.getGroupById(it) }
 
     if (selectedGroup == null) {
@@ -166,9 +165,10 @@ private fun GroupDetailsScreen(
 ) {
     var selectedView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
     val receivedBleCommands by commandController.receivedCommands.collectAsState()
+    val user = authController.currentUser ?: return
 
-    LaunchedEffect(group.id) {
-        commandController.setActiveGroup(group.id)
+    LaunchedEffect(group) {
+        commandController.setActiveGroup(group)
     }
 
     Column(

@@ -5,12 +5,13 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import com.project.blue_command.data.SessionRepository
 import com.project.blue_command.model.CombatDevice
 import com.project.blue_command.model.CombatGroup
 import com.project.blue_command.model.CommandMessage
-import com.project.blue_command.model.TacticalCommand
 import com.project.blue_command.model.UserAccount
 import com.project.blue_command.model.UserRole
+import com.project.blue_command.security.EncryptionManager
 import java.util.UUID
 
 class AuthController : ViewModel() {
@@ -35,12 +36,16 @@ class AuthController : ViewModel() {
 
     var authError by mutableStateOf<String?>(null)
         private set
+    private val encryptionManager = EncryptionManager()
 
     init {
+        val demoGroupKey = encryptionManager.generateNewGroupKeyBase64()
+
         groups.add(
             CombatGroup(
                 id = "ALFA-1234-5678-9012",
                 name = "Oddział Alfa (Demo)",
+                groupKeyBase64 = demoGroupKey,
                 memberIds = mutableListOf("u-soldier-1", "u-soldier-2", "u-soldier-3")
             )
         )
@@ -51,14 +56,16 @@ class AuthController : ViewModel() {
                     senderId = "u-soldier-2",
                     senderUsername = "soldier2",
                     commandLabel = "Enemy",
-                    sentAtMillis = System.currentTimeMillis() - 120_000
+                    sentAtMillis = System.currentTimeMillis() - 120_000,
+                    groupId = "ALFA-1234-5678-9012"
                 ),
                 CommandMessage(
                     id = UUID.randomUUID().toString(),
                     senderId = "u-commander-1",
                     senderUsername = "commander",
                     commandLabel = "Cover This Area",
-                    sentAtMillis = System.currentTimeMillis() - 60_000
+                    sentAtMillis = System.currentTimeMillis() - 60_000,
+                    groupId = "ALFA-1234-5678-9012"
                 )
             )
         )
@@ -72,6 +79,8 @@ class AuthController : ViewModel() {
         return if (user != null) {
             currentUser = user
             authError = null
+
+            SessionRepository.setUser(user)
             true
         } else {
             authError = "Niepoprawny login lub haslo."
@@ -82,6 +91,8 @@ class AuthController : ViewModel() {
     fun logout() {
         currentUser = null
         authError = null
+
+        SessionRepository.clearSession()
     }
 
     fun getSoldiers(): List<UserAccount> = users.filter { it.role == UserRole.SOLDIER }
@@ -92,14 +103,17 @@ class AuthController : ViewModel() {
     fun createGroup(groupName: String): Boolean {
         val name = groupName.trim()
         if (name.isEmpty()) {
-            authError = "Nazwa grupy nie moze byc pusta."
+            authError = "Nazwa grupy nie może być pusta."
             return false
         }
+
+        val newSecretKey = encryptionManager.generateNewGroupKeyBase64()
 
         groups.add(
             CombatGroup(
                 id = UUID.randomUUID().toString(),
-                name = name
+                name = name,
+                groupKeyBase64 = newSecretKey
             )
         )
         authError = null
@@ -143,18 +157,6 @@ class AuthController : ViewModel() {
         return if (names.isEmpty()) "brak" else names.joinToString(", ")
     }
 
-    fun sendCommand(command: TacticalCommand) {
-        val sender = currentUser ?: return
-        commandFeed.add(
-            CommandMessage(
-                id = UUID.randomUUID().toString(),
-                senderId = sender.id,
-                senderUsername = sender.username,
-                commandLabel = command.label,
-                sentAtMillis = System.currentTimeMillis()
-            )
-        )
-    }
 
     fun getCommandsFromOthers(): List<CommandMessage> {
         val currentUserId = currentUser?.id

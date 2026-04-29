@@ -13,16 +13,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.project.blue_command.R
 import com.project.blue_command.model.CommandMessage
@@ -102,21 +107,51 @@ fun CommandsInboxScreen(messages: List<CommandMessage>) {
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text(
-                        text = message.senderUsername,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = message.commandLabel,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = formatMessageTime(message.sentAtMillis),
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = message.senderUsername,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = message.commandLabel,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = formatMessageTime(message.sentAtMillis),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    // Status komendy zależny od ilości potwierdzeń.
+                    // Jeżeli wszyscy członkowie grupy odesłali ACK to status jest zatwierdzony i jest
+                    // to widoczne.
+                    // Jezeli ktoś nie odesłał to retransmisje trwają i jest widoczne ile członków na ilu wysłało ACK
+                    if (message.expectedAcks > 0) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "Status",
+                                tint = if (message.isFullyConfirmed) Color(0xFF4CAF50) else Color.LightGray,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${message.receivedAcks}/${message.expectedAcks}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (message.isFullyConfirmed) Color(0xFF4CAF50) else Color.Gray
+                            )
+                        }
+                    }
                 }
             }
         }

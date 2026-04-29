@@ -1,53 +1,63 @@
 package com.project.blue_command.security
 
+import android.util.Base64
+import android.util.Log
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
-import android.util.Base64
 
 class EncryptionManager {
-    private val keyString = "abcdefgh12345678"
-    private val keySpec = SecretKeySpec(keyString.toByteArray(), "AES")
-    private val transformation = "AES/CBC/PKCS5Padding"
-    private val secretKey: Byte = 0x5A
+    private val transformation = "AES/CTR/NoPadding"
+    private val nonceSize = 8
 
-    fun encryptToBytes(commandCode: Int): ByteArray {
-        val encryptedByte = (commandCode.toByte().toInt() xor secretKey.toInt()).toByte()
-        return byteArrayOf(encryptedByte)
+    fun generateNewGroupKeyBase64(): String {
+        val keyBytes = ByteArray(16)
+        SecureRandom().nextBytes(keyBytes)
+        return Base64.encodeToString(keyBytes, Base64.NO_WRAP)
     }
 
-    fun decryptFromBytes(data: ByteArray): Int? {
-        if (data.isEmpty()) return null
-        val decryptedByte = (data[0].toInt() xor secretKey.toInt()).toByte()
-        return decryptedByte.toInt()
+    fun decodeKeyFromBase64(base64Key: String): ByteArray {
+        return Base64.decode(base64Key, Base64.NO_WRAP)
     }
 
-    fun encrypt(command: String): String {
+    fun encryptPayload(data: ByteArray, keyBytes: ByteArray): ByteArray {
+        val keySpec = SecretKeySpec(keyBytes, "AES")
         val cipher = Cipher.getInstance(transformation)
 
-        val iv = ByteArray(16)
-        SecureRandom().nextBytes(iv)
-        val ivSpec = IvParameterSpec(iv)
+        val nonce = ByteArray(nonceSize)
+        SecureRandom().nextBytes(nonce)
 
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+        val fullIv = ByteArray(16)
+        System.arraycopy(nonce, 0, fullIv, 0, nonceSize)
 
-        val encryptedBytes = cipher.doFinal(command.toByteArray())
-        val combined = iv + encryptedBytes
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, IvParameterSpec(fullIv))
+        val encryptedData = cipher.doFinal(data)
 
-        return Base64.encodeToString(combined, Base64.NO_WRAP)
+        return nonce + encryptedData
     }
 
-    fun decrypt(encryptedBase64: String): String {
-        val combined = Base64.decode(encryptedBase64, Base64.NO_WRAP)
+    fun decryptPayload(data: ByteArray, keyBytes: ByteArray): ByteArray? {
+        return try {
+            if (data.size <= nonceSize) {
+                Log.e("INCORRECT_DECRYPTION", "Niezgodność długości Nonce z długością danych")
+                return null
+            }
 
-        val iv = combined.sliceArray(0 until 16)
-        val ivSpec = IvParameterSpec(iv)
-        val encryptedData = combined.sliceArray(16 until combined.size)
-        val cipher = Cipher.getInstance(transformation)
-        cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
-        val decryptedBytes = cipher.doFinal(encryptedData)
+            val nonce = data.sliceArray(0 until nonceSize)
+            val encryptedData = data.sliceArray(nonceSize until data.size)
 
-        return String(decryptedBytes)
+            val fullIv = ByteArray(16)
+            System.arraycopy(nonce, 0, fullIv, 0, nonceSize)
+
+            val keySpec = SecretKeySpec(keyBytes, "AES")
+            val cipher = Cipher.getInstance(transformation)
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, IvParameterSpec(fullIv))
+
+            cipher.doFinal(encryptedData)
+        } catch (e: Exception) {
+            Log.e("INCORRECT_DECRYPTION", "Nieudana próba deszyfrowania nagłówku payload")
+            null
+        }
     }
 }

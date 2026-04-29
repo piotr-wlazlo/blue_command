@@ -5,5 +5,12 @@ data class CommandMessage(
     val senderId: String,
     val senderUsername: String,
     val commandLabel: String,
-    val sentAtMillis: Long
-)
+    val sentAtMillis: Long,
+    val groupId: String,
+    val bleMsgId: Int? = null,
+    val expectedAcks: Int = 0,
+    val receivedAcks: Int = 0
+) {
+    val isFullyConfirmed: Boolean
+        get() = expectedAcks > 0 && receivedAcks >= expectedAcks
+}

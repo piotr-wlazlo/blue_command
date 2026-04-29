@@ -33,6 +33,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <receiver
+            android:name=".data.BleScanReceiver"
+            android:exported="true"
+            android:permission="TODO"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="com.project.blue_command.ACTION_BLE_SCAN_RESULT" />
+            </intent-filter>
+        </receiver>
     </application>
-
 </manifest>

@@ -41,12 +41,12 @@ private val SOLDIER_ALLOWED_COMMANDS = listOf(
 @Composable
 fun SoldierScreen(authController: AuthController, commandController: CommandController = viewModel()) {
     val user = authController.currentUser ?: return
-    val myGroup = authController.groups.firstOrNull { it.memberIds.contains(user.id) }
+    val group = authController.groups.firstOrNull { it.memberIds.contains(user.id) }
     var selectedSoldierView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
     val receivedBleCommands by commandController.receivedCommands.collectAsState()
 
-    LaunchedEffect(myGroup?.id) {
-        commandController.setActiveGroup(myGroup?.id)
+    LaunchedEffect(group) {
+        commandController.setActiveGroup(group)
     }
 
     Column(
@@ -68,9 +68,9 @@ fun SoldierScreen(authController: AuthController, commandController: CommandCont
                     Text("Rola: SOLDIER", style = MaterialTheme.typography.titleMedium)
                     Text("Użytkownik: ${user.username}")
                     Text(
-                        text = "Oddział: ${myGroup?.name ?: "BRAK PRZYDZIAŁU!"}",
+                        text = "Oddział: ${group?.name ?: "BRAK PRZYDZIAŁU!"}",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (myGroup == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        color = if (group == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                     )
                 }
                 Button(onClick = { authController.logout() }) {
