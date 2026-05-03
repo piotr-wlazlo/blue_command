@@ -1,85 +1,135 @@
 package com.project.blue_command.logic
 
+import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.project.blue_command.data.GroupEntity
+import com.project.blue_command.data.LocalAppDatabase
 import com.project.blue_command.data.SessionRepository
+import com.project.blue_command.data.toCombatGroup
+import com.project.blue_command.data.toEntity
+import com.project.blue_command.data.toUserAccount
+import com.project.blue_command.data.toUserEntity
 import com.project.blue_command.model.CombatDevice
 import com.project.blue_command.model.CombatGroup
 import com.project.blue_command.model.CommandMessage
 import com.project.blue_command.model.UserAccount
 import com.project.blue_command.model.UserRole
 import com.project.blue_command.security.EncryptionManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
-class AuthController : ViewModel() {
-    private val users = listOf(
-        UserAccount("u-commander-1", "commander", "commander123", UserRole.COMMANDER),
-        UserAccount("u-soldier-1", "soldier1", "soldier123", UserRole.SOLDIER),
-        UserAccount("u-soldier-2", "soldier2", "soldier123", UserRole.SOLDIER),
-        UserAccount("u-soldier-3", "soldier3", "soldier123", UserRole.SOLDIER)
-    )
+class AuthController(application: Application) : AndroidViewModel(application) {
+
+    private val appDao = LocalAppDatabase.getDatabase(application).appDao()
+
+    private val usersCache = mutableStateListOf<UserAccount>()
 
     val devices = mutableStateListOf(
         CombatDevice(id = "d-1", name = "Radio Device A"),
         CombatDevice(id = "d-2", name = "Radio Device B"),
-        CombatDevice(id = "d-3", name = "Tracker Device C")
+        CombatDevice(id = "d-3", name = "Tracker Device C"),
     )
 
     val groups = mutableStateListOf<CombatGroup>()
-    val commandFeed = mutableStateListOf<CommandMessage>()
 
     var currentUser by mutableStateOf<UserAccount?>(null)
         private set
 
     var authError by mutableStateOf<String?>(null)
         private set
+
     private val encryptionManager = EncryptionManager()
 
     init {
-        val demoGroupKey = encryptionManager.generateNewGroupKeyBase64()
+        viewModelScope.launch(Dispatchers.IO) {
+            seedDatabaseIfEmpty()
+            refreshUsersFromDb()
+            refreshGroupsFromDb()
+            seedDemoCommandsIfNeeded()
+        }
+    }
 
-        groups.add(
-            CombatGroup(
-                id = "ALFA-1234-5678-9012",
-                name = "Oddział Alfa (Demo)",
-                groupKeyBase64 = demoGroupKey,
-                memberIds = mutableListOf("u-soldier-1", "u-soldier-2", "u-soldier-3")
+    private suspend fun seedDatabaseIfEmpty() {
+        if (appDao.getAllUsers().isEmpty()) {
+            val demoUsers = listOf(
+                UserAccount("u-commander-1", "commander", "commander123", UserRole.COMMANDER),
+                UserAccount("u-soldier-1", "soldier1", "soldier123", UserRole.SOLDIER),
+                UserAccount("u-soldier-2", "soldier2", "soldier123", UserRole.SOLDIER),
+                UserAccount("u-soldier-3", "soldier3", "soldier123", UserRole.SOLDIER),
             )
-        )
-        commandFeed.addAll(
-            listOf(
-                CommandMessage(
-                    id = UUID.randomUUID().toString(),
-                    senderId = "u-soldier-2",
-                    senderUsername = "soldier2",
-                    commandLabel = "Enemy",
-                    sentAtMillis = System.currentTimeMillis() - 120_000,
-                    groupId = "ALFA-1234-5678-9012"
+            demoUsers.forEach { appDao.insertUser(it.toUserEntity()) }
+        }
+        if (appDao.getAllGroups().isEmpty()) {
+            val demoGroupKey = encryptionManager.generateNewGroupKeyBase64()
+            appDao.insertGroup(
+                GroupEntity(
+                    id = DEMO_GROUP_ID,
+                    name = "Oddział Alfa (Demo)",
+                    groupKeyBase64 = demoGroupKey,
+                    memberIds = listOf("u-soldier-1", "u-soldier-2", "u-soldier-3"),
                 ),
-                CommandMessage(
-                    id = UUID.randomUUID().toString(),
-                    senderId = "u-commander-1",
-                    senderUsername = "commander",
-                    commandLabel = "Cover This Area",
-                    sentAtMillis = System.currentTimeMillis() - 60_000,
-                    groupId = "ALFA-1234-5678-9012"
-                )
             )
-        )
+        }
+    }
+
+    private suspend fun seedDemoCommandsIfNeeded() {
+        if (appDao.countCommandsForGroup(DEMO_GROUP_ID) > 0) return
+        val now = System.currentTimeMillis()
+        listOf(
+            CommandMessage(
+                id = UUID.randomUUID().toString(),
+                senderId = "u-soldier-2",
+                senderUsername = "soldier2",
+                commandLabel = "Enemy",
+                sentAtMillis = now - 120_000,
+                groupId = DEMO_GROUP_ID,
+            ),
+            CommandMessage(
+                id = UUID.randomUUID().toString(),
+                senderId = "u-commander-1",
+                senderUsername = "commander",
+                commandLabel = "Cover This Area",
+                sentAtMillis = now - 60_000,
+                groupId = DEMO_GROUP_ID,
+            ),
+        ).forEach { appDao.insertCommand(it.toEntity()) }
+    }
+
+    private suspend fun refreshUsersFromDb() {
+        val loaded = appDao.getAllUsers().map { it.toUserAccount() }
+        withContext(Dispatchers.Main.immediate) {
+            usersCache.clear()
+            usersCache.addAll(loaded)
+        }
+    }
+
+    private suspend fun refreshGroupsFromDb() {
+        val loaded = appDao.getAllGroups().map { it.toCombatGroup() }
+        withContext(Dispatchers.Main.immediate) {
+            groups.clear()
+            groups.addAll(loaded)
+        }
     }
 
     fun login(username: String, password: String): Boolean {
-        val user = users.firstOrNull {
-            it.username.equals(username.trim(), ignoreCase = true) && it.password == password
+        val trimmedUser = username.trim()
+        val rows = runBlocking(Dispatchers.IO) {
+            appDao.getAllUsers()
         }
-
+        val user = rows.map { it.toUserAccount() }.firstOrNull {
+            it.username.equals(trimmedUser, ignoreCase = true) && it.password == password
+        }
         return if (user != null) {
             currentUser = user
             authError = null
-
             SessionRepository.setUser(user)
             true
         } else {
@@ -91,11 +141,10 @@ class AuthController : ViewModel() {
     fun logout() {
         currentUser = null
         authError = null
-
         SessionRepository.clearSession()
     }
 
-    fun getSoldiers(): List<UserAccount> = users.filter { it.role == UserRole.SOLDIER }
+    fun getSoldiers(): List<UserAccount> = usersCache.filter { it.role == UserRole.SOLDIER }
 
     fun getDeviceAssignedToSoldier(soldierId: String): CombatDevice? =
         devices.firstOrNull { it.assignedSoldierId == soldierId }
@@ -106,39 +155,45 @@ class AuthController : ViewModel() {
             authError = "Nazwa grupy nie może być pusta."
             return false
         }
-
-        val newSecretKey = encryptionManager.generateNewGroupKeyBase64()
-
-        groups.add(
-            CombatGroup(
-                id = UUID.randomUUID().toString(),
-                name = name,
-                groupKeyBase64 = newSecretKey
+        viewModelScope.launch(Dispatchers.IO) {
+            val newSecretKey = encryptionManager.generateNewGroupKeyBase64()
+            appDao.insertGroup(
+                GroupEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    groupKeyBase64 = newSecretKey,
+                    memberIds = emptyList(),
+                ),
             )
-        )
+            refreshGroupsFromDb()
+        }
         authError = null
         return true
     }
 
     fun assignSoldierToGroup(soldierId: String, groupId: String) {
-        val group = groups.firstOrNull { it.id == groupId } ?: return
-        if (!group.memberIds.contains(soldierId)) {
-            group.memberIds.add(soldierId)
-            // Trigger Compose recomposition for list item changes.
-            groups[groups.indexOf(group)] = group.copy(memberIds = group.memberIds.toMutableList())
+        viewModelScope.launch(Dispatchers.IO) {
+            val entity = appDao.getGroupById(groupId) ?: return@launch
+            if (entity.memberIds.contains(soldierId)) return@launch
+            val updated = entity.copy(memberIds = entity.memberIds + soldierId)
+            appDao.insertGroup(updated)
+            refreshGroupsFromDb()
         }
     }
 
     fun removeSoldierFromGroup(soldierId: String, groupId: String) {
-        val group = groups.firstOrNull { it.id == groupId } ?: return
-        if (group.memberIds.remove(soldierId)) {
-            groups[groups.indexOf(group)] = group.copy(memberIds = group.memberIds.toMutableList())
+        viewModelScope.launch(Dispatchers.IO) {
+            val entity = appDao.getGroupById(groupId) ?: return@launch
+            if (!entity.memberIds.contains(soldierId)) return@launch
+            val updated = entity.copy(memberIds = entity.memberIds.filter { it != soldierId })
+            appDao.insertGroup(updated)
+            refreshGroupsFromDb()
         }
     }
 
     fun getGroupById(groupId: String): CombatGroup? = groups.firstOrNull { it.id == groupId }
 
-    fun getUserById(userId: String): UserAccount? = users.firstOrNull { it.id == userId }
+    fun getUserById(userId: String): UserAccount? = usersCache.firstOrNull { it.id == userId }
 
     fun assignSoldierToDevice(soldierId: String, deviceId: String) {
         val targetDevice = devices.firstOrNull { it.id == deviceId } ?: return
@@ -152,16 +207,11 @@ class AuthController : ViewModel() {
     }
 
     fun getSoldierNamesForGroup(group: CombatGroup): String {
-        val names = group.memberIds
-            .mapNotNull { memberId -> users.firstOrNull { it.id == memberId }?.username }
+        val names = group.memberIds.mapNotNull { memberId -> getUserById(memberId)?.username }
         return if (names.isEmpty()) "brak" else names.joinToString(", ")
     }
 
-
-    fun getCommandsFromOthers(): List<CommandMessage> {
-        val currentUserId = currentUser?.id
-        return commandFeed
-            .filter { it.senderId != currentUserId }
-            .sortedBy { it.sentAtMillis }
+    companion object {
+        private const val DEMO_GROUP_ID = "ALFA-1234-5678-9012"
     }
 }

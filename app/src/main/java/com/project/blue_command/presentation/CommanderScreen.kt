@@ -35,6 +35,7 @@ import com.project.blue_command.model.CombatGroup
 
 @Composable
 fun CommanderScreen(authController: AuthController) {
+    val commandController: CommandController = viewModel(factory = CommandController.factory(authController))
     var newGroupName by remember { mutableStateOf("") }
     var selectedGroupId by remember { mutableStateOf<String?>(null) }
     var isManageMode by remember { mutableStateOf(false) }
@@ -57,6 +58,7 @@ fun CommanderScreen(authController: AuthController) {
         GroupDetailsScreen(
             authController = authController,
             group = selectedGroup,
+            commandController = commandController,
             onBack = {
                 selectedGroupId = null
                 isManageMode = false
@@ -159,9 +161,9 @@ private fun CommanderMainPanel(
 private fun GroupDetailsScreen(
     authController: AuthController,
     group: CombatGroup,
+    commandController: CommandController,
     onBack: () -> Unit,
     onManageGroup: () -> Unit,
-    commandController: CommandController = viewModel()
 ) {
     var selectedView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
     val receivedBleCommands by commandController.receivedCommands.collectAsState()

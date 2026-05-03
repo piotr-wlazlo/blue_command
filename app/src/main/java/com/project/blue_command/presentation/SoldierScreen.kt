@@ -39,7 +39,10 @@ private val SOLDIER_ALLOWED_COMMANDS = listOf(
 )
 
 @Composable
-fun SoldierScreen(authController: AuthController, commandController: CommandController = viewModel()) {
+fun SoldierScreen(
+    authController: AuthController,
+    commandController: CommandController = viewModel(factory = CommandController.factory(authController)),
+) {
     val user = authController.currentUser ?: return
     val group = authController.groups.firstOrNull { it.memberIds.contains(user.id) }
     var selectedSoldierView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
