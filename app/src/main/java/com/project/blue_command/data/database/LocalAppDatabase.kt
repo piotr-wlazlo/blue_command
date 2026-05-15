@@ -1,4 +1,4 @@
-package com.project.blue_command.data
+package com.project.blue_command.data.database
 
 import android.content.Context
 import androidx.room.Database

@@ -1,4 +1,4 @@
-package com.project.blue_command.data
+package com.project.blue_command.data.database
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface AppDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.Companion.REPLACE)
     suspend fun insertCommand(message: CommandMessageEntity)
 
     @Query(
@@ -21,7 +21,7 @@ interface AppDao {
     )
     fun getCommandsForGroup(groupId: String): Flow<List<CommandMessageEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.Companion.REPLACE)
     suspend fun insertGroup(group: GroupEntity)
 
     @Query("SELECT * FROM combat_groups")

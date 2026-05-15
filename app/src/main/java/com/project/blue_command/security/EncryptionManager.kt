@@ -56,7 +56,7 @@ class EncryptionManager {
 
             cipher.doFinal(encryptedData)
         } catch (e: Exception) {
-            Log.e("INCORRECT_DECRYPTION", "Nieudana próba deszyfrowania nagłówku payload")
+            Log.d("INCORRECT_DECRYPTION", "Nieudana próba deszyfrowania nagłówku payload")
             null
         }
     }

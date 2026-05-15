@@ -9,7 +9,7 @@ data class CommandMessage(
     val groupId: String,
     val bleMsgId: Int? = null,
     val expectedAcks: Int = 0,
-    val receivedAcks: Int = 0
+    val receivedAcks: Int = 0,
 ) {
     val isFullyConfirmed: Boolean
         get() = expectedAcks > 0 && receivedAcks >= expectedAcks

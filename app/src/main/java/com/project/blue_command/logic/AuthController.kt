@@ -7,13 +7,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.project.blue_command.data.GroupEntity
-import com.project.blue_command.data.LocalAppDatabase
+import com.project.blue_command.data.database.GroupEntity
+import com.project.blue_command.data.database.LocalAppDatabase
 import com.project.blue_command.data.SessionRepository
-import com.project.blue_command.data.toCombatGroup
-import com.project.blue_command.data.toEntity
-import com.project.blue_command.data.toUserAccount
-import com.project.blue_command.data.toUserEntity
+import com.project.blue_command.data.database.toCombatGroup
+import com.project.blue_command.data.database.toEntity
+import com.project.blue_command.data.database.toUserAccount
+import com.project.blue_command.data.database.toUserEntity
 import com.project.blue_command.model.CombatDevice
 import com.project.blue_command.model.CombatGroup
 import com.project.blue_command.model.CommandMessage
@@ -68,12 +68,12 @@ class AuthController(application: Application) : AndroidViewModel(application) {
             demoUsers.forEach { appDao.insertUser(it.toUserEntity()) }
         }
         if (appDao.getAllGroups().isEmpty()) {
-            val demoGroupKey = encryptionManager.generateNewGroupKeyBase64()
+//            val demoGroupKey = encryptionManager.generateNewGroupKeyBase64()
             appDao.insertGroup(
                 GroupEntity(
                     id = DEMO_GROUP_ID,
                     name = "Oddział Alfa (Demo)",
-                    groupKeyBase64 = demoGroupKey,
+                    groupKeyBase64 = "yGXcddukkpOdtigrwfuypg==",
                     memberIds = listOf("u-soldier-1", "u-soldier-2", "u-soldier-3"),
                 ),
             )

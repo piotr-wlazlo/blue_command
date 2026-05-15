@@ -1,4 +1,4 @@
-package com.project.blue_command.data
+package com.project.blue_command.data.database
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey

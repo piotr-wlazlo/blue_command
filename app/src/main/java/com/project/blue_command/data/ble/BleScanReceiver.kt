@@ -1,4 +1,4 @@
-package com.project.blue_command.data
+package com.project.blue_command.data.ble
 
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanResult
@@ -22,7 +22,7 @@ class BleScanReceiver : BroadcastReceiver() {
             val manufacturerData = scanRecord.getManufacturerSpecificData(0xFFFF)
 
             if (manufacturerData != null) {
-                Log.d("BLE_PENDING", "SYSTEM WYKRYŁ ESP32! Przekazuję dane...")
+                Log.d("BLE_PENDING", "Odebrano dane. Dane nie musza byc z grupy, w ktorej jestem.")
                 BleDataBridge.emit(manufacturerData)
             }
         }

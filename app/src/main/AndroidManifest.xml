@@ -34,7 +34,7 @@
             </intent-filter>
         </activity>
         <receiver
-            android:name=".data.BleScanReceiver"
+            android:name=".data.ble.BleScanReceiver"
             android:exported="true"
             android:permission="TODO"
             tools:ignore="ExportedReceiver">

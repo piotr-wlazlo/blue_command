@@ -1,4 +1,4 @@
-package com.project.blue_command.data
+package com.project.blue_command.data.database
 
 import com.project.blue_command.model.CombatGroup
 import com.project.blue_command.model.CommandMessage

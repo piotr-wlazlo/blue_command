@@ -5,11 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.project.blue_command.data.LocalAppDatabase
+import com.project.blue_command.data.database.LocalAppDatabase
 import com.project.blue_command.data.SessionRepository
 import com.project.blue_command.data.TacticalRadioManager
-import com.project.blue_command.data.toCommandMessage
-import com.project.blue_command.data.toEntity
+import com.project.blue_command.data.database.toCommandMessage
+import com.project.blue_command.data.database.toEntity
 import com.project.blue_command.model.CombatGroup
 import com.project.blue_command.model.CommandMessage
 import com.project.blue_command.model.TacticalCommand
@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 class CommandController(
     application: Application,
-    private val authController: AuthController,
+    private val authController: AuthController
 ) : AndroidViewModel(application) {
 
     private val radioManager = TacticalRadioManager(application)
@@ -58,7 +58,7 @@ class CommandController(
         viewModelScope.launch {
             SessionRepository.activeGroup.collect { group ->
                 if (group != null) {
-                    radioManager.startListening(group)
+                    radioManager.startListening()
                 } else {
                     radioManager.stopListening()
                 }
@@ -85,6 +85,8 @@ class CommandController(
                 val dataByte = payload[2].toInt() and 0xFF
                 val senderHash = payload[3].toInt() and 0xFF
 
+                println("$msgType, $msgId, $dataByte, $senderHash")
+
                 when (msgType) {
                     0x01 -> {
                         val cmdCode = dataByte
@@ -99,8 +101,8 @@ class CommandController(
                                 authController.getUserById(memberId)
                             }.find { (it.id.hashCode() and 0xFF) == senderHash }
 
-                            val senderName = sender?.username ?: "Nieznany ($senderHash)"
-                            val senderId = sender?.id ?: "unknown"
+                            val senderName = sender?.username ?: "($senderHash)"
+                            val senderId = sender?.id ?: "commander"
 
                             TacticalCommand.entries.find { it.code == cmdCode }?.let { cmd ->
                                 addMessageToList(senderId, senderName, cmd.label, group.id)
@@ -111,8 +113,9 @@ class CommandController(
                             delay((0..1000).random().toLong())
                             val userHashByte = (user.id.hashCode() and 0xFF).toByte()
                             val ackPayload = byteArrayOf(0x02, msgId.toByte(), userHashByte)
-
-                            radioManager.broadcastCommand(group, ackPayload)
+                            repeat(2) {
+                                radioManager.sendCommand(ackPayload)
+                            }
                         }
                     }
 
@@ -147,6 +150,7 @@ class CommandController(
         val group = SessionRepository.activeGroup.value ?: return
         val user = SessionRepository.currentUser.value ?: return
 
+        // Na razie 100 dla testowania
         val msgId = 100
         val expectedAcks = group.memberIds.filter { it != user.id }.toMutableSet()
         pendingAcks[msgId] = expectedAcks
@@ -157,8 +161,12 @@ class CommandController(
         val cmdPayload = byteArrayOf(0x01, msgId.toByte(), command.code.toByte(), userHashByte)
 
         val job = viewModelScope.launch {
+            var counterCommands = 0
             while (isActive && pendingAcks[msgId]?.isNotEmpty() == true) {
-                radioManager.broadcastCommand(group, cmdPayload)
+                radioManager.sendCommand(cmdPayload)
+                counterCommands++
+                if (counterCommands == 8) return@launch
+                delay(3000)
             }
         }
         retransmissionJobs[msgId] = job
@@ -187,7 +195,7 @@ class CommandController(
             expectedAcks = expectedAcks,
             receivedAcks = 0,
         )
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             appDao.insertCommand(newMessage.toEntity())
         }
     }
