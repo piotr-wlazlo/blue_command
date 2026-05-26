@@ -26,7 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.project.blue_command.logic.AuthController
@@ -102,7 +102,8 @@ private fun CommanderMainPanel(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text("Utwórz grupe", style = MaterialTheme.typography.titleMedium)
@@ -125,7 +126,8 @@ private fun CommanderMainPanel(
         if (authController.groups.isEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Text("Brak utworzonych grup.", modifier = Modifier.padding(12.dp))
             }
@@ -133,7 +135,8 @@ private fun CommanderMainPanel(
             authController.groups.forEach { group ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
                         modifier = Modifier
@@ -166,11 +169,26 @@ private fun GroupDetailsScreen(
     onManageGroup: () -> Unit,
 ) {
     var selectedView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
+    var isQrWindowVisible by remember { mutableStateOf(false) }
     val receivedBleCommands by commandController.receivedCommands.collectAsState()
     val user = authController.currentUser ?: return
+    val groupMembers = remember(group, authController.groups) {
+        group.memberIds.mapNotNull { authController.getUserById(it) }
+    }
 
     LaunchedEffect(group) {
         commandController.setActiveGroup(group)
+    }
+
+    if (isQrWindowVisible) {
+        CommanderQrSyncScreen(
+            authController = authController,
+            group = group,
+            groupMembers = groupMembers,
+            messages = receivedBleCommands,
+            onBack = { isQrWindowVisible = false },
+        )
+        return
     }
 
     Column(
@@ -184,12 +202,16 @@ private fun GroupDetailsScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             TextButton(onClick = onBack) { Text("Powrót") }
-            Button(onClick = { authController.logout() }) { Text("Wyloguj") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { isQrWindowVisible = true }) { Text("Wyświetl kod") }
+                Button(onClick = { authController.logout() }) { Text("Wyloguj") }
+            }
         }
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text("Nasłuch radiowy: ${group.name}", style = MaterialTheme.typography.titleSmall)
@@ -200,9 +222,12 @@ private fun GroupDetailsScreen(
             }
         }
 
+        LatestCommandPreviewCard(messages = receivedBleCommands)
+
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             MainViewToggle(
                 selectedView = selectedView,
@@ -214,16 +239,64 @@ private fun GroupDetailsScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Box(modifier = Modifier.padding(4.dp)) {
                 if (selectedView == SoldierMainView.COMMANDS) {
                     CommandScreen(controller = commandController)
                 } else {
-                    CommandsInboxScreen(messages = receivedBleCommands)
+                    CommandsInboxScreen(
+                        messages = receivedBleCommands,
+                        resolveUsername = { memberId ->
+                            authController.getUserById(memberId)?.username ?: memberId
+                        },
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CommanderQrSyncScreen(
+    authController: AuthController,
+    group: CombatGroup,
+    groupMembers: List<com.project.blue_command.model.UserAccount>,
+    messages: List<com.project.blue_command.model.CommandMessage>,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(onClick = onBack) { Text("Powrót") }
+            Button(onClick = { authController.logout() }) { Text("Wyloguj") }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Synchronizacja dla: ${group.name}", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("Pokaż ten kod żołnierzowi do importu danych.")
+            }
+        }
+
+        DatabaseSyncQrCard(
+            group = group,
+            members = groupMembers,
+            messages = messages,
+        )
     }
 }
 
@@ -254,7 +327,8 @@ private fun ManageGroupScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text("Zarządzanie: ${group.name}", style = MaterialTheme.typography.titleMedium)
@@ -282,7 +356,8 @@ private fun ManageGroupScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text("Dodaj użytkownika", style = MaterialTheme.typography.titleSmall)

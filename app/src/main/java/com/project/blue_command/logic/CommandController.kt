@@ -50,6 +50,7 @@ class CommandController(
 
     private val pendingAcks = ConcurrentHashMap<Int, MutableSet<String>>()
     private val retransmissionJobs = ConcurrentHashMap<Int, Job>()
+    private var nextOutgoingBleMsgId = 100
 
     private var lastMsgId: Int? = null
     private var lastTime: Long = 0L
@@ -78,17 +79,16 @@ class CommandController(
                 val group = SessionRepository.activeGroup.value ?: return@collect
                 val user = SessionRepository.currentUser.value ?: return@collect
 
-                if (payload.size < 4) return@collect
+                if (payload.size < 3) return@collect
 
                 val msgType = payload[0].toInt() and 0xFF
                 val msgId = payload[1].toInt() and 0xFF
                 val dataByte = payload[2].toInt() and 0xFF
-                val senderHash = payload[3].toInt() and 0xFF
-
-                println("$msgType, $msgId, $dataByte, $senderHash")
 
                 when (msgType) {
                     0x01 -> {
+                        if (payload.size < 4) return@collect
+                        val senderHash = payload[3].toInt() and 0xFF
                         val cmdCode = dataByte
                         val now = System.currentTimeMillis()
                         val isDuplicate = (msgId == lastMsgId && (now - lastTime) < 5000)
@@ -113,6 +113,7 @@ class CommandController(
                             delay((0..1000).random().toLong())
                             val userHashByte = (user.id.hashCode() and 0xFF).toByte()
                             val ackPayload = byteArrayOf(0x02, msgId.toByte(), userHashByte)
+                            println("BLE_ACK: Wysyłam ACK: msgId=$msgId, from=${user.username}, hash=${userHashByte.toInt() and 0xFF}")
                             repeat(2) {
                                 radioManager.sendCommand(ackPayload)
                             }
@@ -120,20 +121,37 @@ class CommandController(
                     }
 
                     0x02 -> {
-                        val senderHash = dataByte
+                        val ackSenderHash = dataByte
                         val pendingForThisMsg = pendingAcks[msgId]
+                        println("BLE_ACK: Odebrano ACK: msgId=$msgId, senderHash=$ackSenderHash, pending=${pendingForThisMsg?.size ?: 0}")
 
                         if (pendingForThisMsg != null) {
-                            val wasRemoved = pendingForThisMsg.removeIf { (it.hashCode() and 0xFF) == senderHash }
+                            val acknowledgedUserId = pendingForThisMsg.firstOrNull {
+                                (it.hashCode() and 0xFF) == ackSenderHash
+                            }
+                            if (acknowledgedUserId == null) {
+                                println("BLE_ACK: ACK nierozpoznany w pendingAcks: msgId=$msgId, senderHash=$ackSenderHash")
+                            }
+                            val wasRemoved = acknowledgedUserId != null && pendingForThisMsg.remove(acknowledgedUserId)
 
                             if (wasRemoved) {
+                                println("BLE_ACK: ACK dopasowany: msgId=$msgId, userId=$acknowledgedUserId, pozostało=${pendingForThisMsg.size}")
                                 viewModelScope.launch(Dispatchers.IO) {
                                     val entity = appDao.getCommandByBleMeta(group.id, msgId, user.id)
                                         ?: return@launch
-                                    appDao.updateCommandReceivedAcks(entity.id, entity.receivedAcks + 1)
+                                    appDao.insertCommand(
+                                        entity.copy(
+                                            receivedAcks = entity.receivedAcks + 1,
+                                            acknowledgedMemberIds = (
+                                                entity.acknowledgedMemberIds + acknowledgedUserId
+                                            ).distinct(),
+                                            isFailed = false,
+                                        ),
+                                    )
                                 }
 
                                 if (pendingForThisMsg.isEmpty()) {
+                                    println("BLE_ACK: Komenda w pełni potwierdzona: msgId=$msgId")
                                     retransmissionJobs[msgId]?.cancel()
                                     retransmissionJobs.remove(msgId)
                                     pendingAcks.remove(msgId)
@@ -150,12 +168,19 @@ class CommandController(
         val group = SessionRepository.activeGroup.value ?: return
         val user = SessionRepository.currentUser.value ?: return
 
-        // Na razie 100 dla testowania
-        val msgId = 100
+        val msgId = consumeNextBleMsgId()
         val expectedAcks = group.memberIds.filter { it != user.id }.toMutableSet()
         pendingAcks[msgId] = expectedAcks
 
-        addMessageToList(user.id, user.username, command.label, group.id, msgId, expectedAcks.size)
+        addMessageToList(
+            senderId = user.id,
+            senderName = user.username,
+            label = command.label,
+            groupId = group.id,
+            bleMsgId = msgId,
+            expectedAcks = expectedAcks.size,
+            expectedAckMemberIds = expectedAcks.toList(),
+        )
 
         val userHashByte = (user.id.hashCode() and 0xFF).toByte()
         val cmdPayload = byteArrayOf(0x01, msgId.toByte(), command.code.toByte(), userHashByte)
@@ -165,7 +190,12 @@ class CommandController(
             while (isActive && pendingAcks[msgId]?.isNotEmpty() == true) {
                 radioManager.sendCommand(cmdPayload)
                 counterCommands++
-                if (counterCommands == 8) return@launch
+                if (counterCommands == 8) {
+                    markCommandAsFailed(group.id, msgId, user.id)
+                    pendingAcks.remove(msgId)
+                    retransmissionJobs.remove(msgId)
+                    return@launch
+                }
                 delay(3000)
             }
         }
@@ -183,6 +213,7 @@ class CommandController(
         groupId: String,
         bleMsgId: Int? = null,
         expectedAcks: Int = 0,
+        expectedAckMemberIds: List<String> = emptyList(),
     ) {
         val newMessage = CommandMessage(
             id = UUID.randomUUID().toString(),
@@ -194,9 +225,28 @@ class CommandController(
             bleMsgId = bleMsgId,
             expectedAcks = expectedAcks,
             receivedAcks = 0,
+            expectedAckMemberIds = expectedAckMemberIds,
+            acknowledgedMemberIds = emptyList(),
+            isFailed = false,
         )
         viewModelScope.launch {
             appDao.insertCommand(newMessage.toEntity())
+        }
+    }
+
+    private fun consumeNextBleMsgId(): Int {
+        val current = nextOutgoingBleMsgId
+        nextOutgoingBleMsgId++
+        if (nextOutgoingBleMsgId > 255) {
+            nextOutgoingBleMsgId = 100
+        }
+        return current
+    }
+
+    private fun markCommandAsFailed(groupId: String, msgId: Int, senderId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val entity = appDao.getCommandByBleMeta(groupId, msgId, senderId) ?: return@launch
+            appDao.insertCommand(entity.copy(isFailed = true))
         }
     }
 

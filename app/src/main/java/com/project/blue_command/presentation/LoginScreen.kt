@@ -1,5 +1,8 @@
 package com.project.blue_command.presentation
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -24,9 +29,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.project.blue_command.R
 import com.project.blue_command.logic.AuthController
 
@@ -34,6 +45,26 @@ import com.project.blue_command.logic.AuthController
 fun LoginScreen(authController: AuthController) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var syncMessage by remember { mutableStateOf("Jeśli jesteś żołnierzem, najpierw zsynchronizuj dane przez QR.") }
+    var importInProgress by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val focusManager = LocalFocusManager.current
+
+    fun submitLogin() {
+        focusManager.clearFocus()
+        authController.login(username, password)
+    }
+
+    val scanner = remember(activity) {
+        activity?.let {
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            GmsBarcodeScanning.getClient(it, options)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -64,7 +95,12 @@ fun LoginScreen(authController: AuthController) {
                     value = username,
                     onValueChange = { username = it },
                     label = { Text("Login") },
-                    modifier = Modifier.fillMaxWidth()
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(
+                        onNext = { focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) }
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
@@ -72,19 +108,64 @@ fun LoginScreen(authController: AuthController) {
                     onValueChange = { password = it },
                     label = { Text("Haslo") },
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submitLogin() }),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
-                    onClick = { authController.login(username, password) },
+                    onClick = { submitLogin() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Zaloguj")
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        if (scanner == null) {
+                            syncMessage = "Nie można uruchomić skanera na tym urządzeniu."
+                            return@Button
+                        }
+                        importInProgress = true
+                        syncMessage = "Skanowanie kodu QR..."
+                        scanner.startScan()
+                            .addOnSuccessListener { barcode ->
+                                val rawPayload = barcode.rawValue
+                                if (rawPayload.isNullOrBlank()) {
+                                    importInProgress = false
+                                    syncMessage = "Kod QR jest pusty."
+                                } else {
+                                    authController.importSyncFromQr(rawPayload) { result ->
+                                        importInProgress = false
+                                        syncMessage = result.message
+                                    }
+                                }
+                            }
+                            .addOnCanceledListener {
+                                importInProgress = false
+                                syncMessage = "Skanowanie anulowane."
+                            }
+                            .addOnFailureListener { error ->
+                                importInProgress = false
+                                syncMessage = error.message ?: "Nie udało się zeskanować kodu QR."
+                            }
+                    },
+                    enabled = !importInProgress,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (importInProgress) "Trwa import..." else "Skanuj QR synchronizacji")
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = "Demo: commander/commander123, soldier1/soldier123",
                     style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = syncMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
             }
         }
@@ -93,4 +174,10 @@ fun LoginScreen(authController: AuthController) {
             Text(text = message, color = MaterialTheme.colorScheme.error)
         }
     }
+}
+
+private fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

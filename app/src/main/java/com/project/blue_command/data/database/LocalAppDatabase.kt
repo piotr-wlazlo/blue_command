@@ -11,8 +11,9 @@ import androidx.room.TypeConverters
         CommandMessageEntity::class,
         GroupEntity::class,
         UserEntity::class,
+        UserSessionEntity::class,
     ],
-    version = 2,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(StringListConverter::class)

@@ -10,6 +10,9 @@ import androidx.lifecycle.viewModelScope
 import com.project.blue_command.data.database.GroupEntity
 import com.project.blue_command.data.database.LocalAppDatabase
 import com.project.blue_command.data.SessionRepository
+import com.project.blue_command.data.database.CommandMessageEntity
+import com.project.blue_command.data.database.UserEntity
+import com.project.blue_command.data.database.UserSessionEntity
 import com.project.blue_command.data.database.toCombatGroup
 import com.project.blue_command.data.database.toEntity
 import com.project.blue_command.data.database.toUserAccount
@@ -24,7 +27,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.util.UUID
+import java.util.zip.GZIPInputStream
 
 class AuthController(application: Application) : AndroidViewModel(application) {
 
@@ -52,6 +58,7 @@ class AuthController(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             seedDatabaseIfEmpty()
             refreshUsersFromDb()
+            restoreLoggedUserFromSession()
             refreshGroupsFromDb()
             seedDemoCommandsIfNeeded()
         }
@@ -131,6 +138,15 @@ class AuthController(application: Application) : AndroidViewModel(application) {
             currentUser = user
             authError = null
             SessionRepository.setUser(user)
+            viewModelScope.launch(Dispatchers.IO) {
+                appDao.upsertUserSession(
+                    UserSessionEntity(
+                        id = SESSION_ROW_ID,
+                        userId = user.id,
+                        loggedAtMillis = System.currentTimeMillis(),
+                    ),
+                )
+            }
             true
         } else {
             authError = "Niepoprawny login lub haslo."
@@ -142,6 +158,9 @@ class AuthController(application: Application) : AndroidViewModel(application) {
         currentUser = null
         authError = null
         SessionRepository.clearSession()
+        viewModelScope.launch(Dispatchers.IO) {
+            appDao.clearUserSession()
+        }
     }
 
     fun getSoldiers(): List<UserAccount> = usersCache.filter { it.role == UserRole.SOLDIER }
@@ -211,7 +230,153 @@ class AuthController(application: Application) : AndroidViewModel(application) {
         return if (names.isEmpty()) "brak" else names.joinToString(", ")
     }
 
+    data class SyncImportResult(
+        val success: Boolean,
+        val message: String,
+    )
+
+    fun importSyncFromQr(rawPayload: String, onComplete: (SyncImportResult) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { importSyncFromQrInternal(rawPayload) }
+            if (result.success) {
+                refreshUsersFromDb()
+                refreshGroupsFromDb()
+            }
+            onComplete(result)
+        }
+    }
+
+    private suspend fun importSyncFromQrInternal(rawPayload: String): SyncImportResult {
+        val payload = rawPayload.trim()
+        if (!payload.startsWith(SYNC_PREFIX)) {
+            return SyncImportResult(false, "To nie jest poprawny kod synchronizacji.")
+        }
+
+        val compressedContent = payload.removePrefix(SYNC_PREFIX)
+        if (compressedContent.isBlank()) {
+            return SyncImportResult(false, "Kod synchronizacji jest pusty.")
+        }
+
+        return try {
+            val jsonString = decodeAndDecompress(compressedContent)
+            val root = JSONObject(jsonString)
+            if (root.optInt("v", -1) != 1) {
+                return SyncImportResult(false, "Nieobsługiwana wersja pakietu synchronizacji.")
+            }
+
+            val groupObject = root.optJSONObject("g")
+                ?: return SyncImportResult(false, "Brak danych grupy w kodzie QR.")
+            val groupId = groupObject.optString("id")
+            val groupName = groupObject.optString("n")
+            val groupKey = groupObject.optString("k")
+            if (groupId.isBlank() || groupName.isBlank() || groupKey.isBlank()) {
+                return SyncImportResult(false, "Niekompletne dane grupy w kodzie QR.")
+            }
+
+            val usersArray = root.optJSONArray("u")
+            val existingUsers = appDao.getAllUsers().associateBy { it.id }
+            val importedMemberIds = mutableListOf<String>()
+            var importedUsersCount = 0
+
+            if (usersArray != null) {
+                for (index in 0 until usersArray.length()) {
+                    val userObj = usersArray.optJSONObject(index) ?: continue
+                    val userId = userObj.optString("id")
+                    val username = userObj.optString("un")
+                    val roleName = userObj.optString("r")
+                    if (userId.isBlank() || username.isBlank() || roleName.isBlank()) continue
+
+                    val role = runCatching { UserRole.valueOf(roleName) }.getOrNull() ?: continue
+                    val existing = existingUsers[userId]
+                    val password = existing?.password ?: "synced-user"
+                    appDao.upsertUser(
+                        UserEntity(
+                            id = userId,
+                            username = username,
+                            password = password,
+                            roleName = role.name,
+                        ),
+                    )
+                    importedUsersCount++
+                    importedMemberIds.add(userId)
+                }
+            }
+
+            appDao.insertGroup(
+                GroupEntity(
+                    id = groupId,
+                    name = groupName,
+                    groupKeyBase64 = groupKey,
+                    memberIds = importedMemberIds.distinct(),
+                ),
+            )
+
+            val commandsArray = root.optJSONArray("c")
+            var importedCommandsCount = 0
+            if (commandsArray != null) {
+                for (index in 0 until commandsArray.length()) {
+                    val commandObj = commandsArray.optJSONObject(index) ?: continue
+                    val commandId = commandObj.optString("id").ifBlank { UUID.randomUUID().toString() }
+                    val senderId = commandObj.optString("sid").ifBlank { "unknown" }
+                    val senderUsername = commandObj.optString("sun").ifBlank { "unknown" }
+                    val commandLabel = commandObj.optString("cmd").ifBlank { continue }
+                    val sentAt = commandObj.optLong("t", System.currentTimeMillis())
+                    val expectedAcks = commandObj.optInt("exp", 0)
+                    val receivedAcks = commandObj.optInt("ack", 0)
+                    val isFailed = commandObj.optBoolean("f", false)
+
+                    appDao.insertCommand(
+                        CommandMessageEntity(
+                            id = commandId,
+                            senderId = senderId,
+                            senderUsername = senderUsername,
+                            commandLabel = commandLabel,
+                            sentAtMillis = sentAt,
+                            groupId = groupId,
+                            expectedAcks = expectedAcks,
+                            receivedAcks = receivedAcks,
+                            isFailed = isFailed,
+                        ),
+                    )
+                    importedCommandsCount++
+                }
+            }
+
+            SyncImportResult(
+                success = true,
+                message = "Synchronizacja zakończona. Użytkownicy: $importedUsersCount, komendy: $importedCommandsCount.",
+            )
+        } catch (_: Exception) {
+            SyncImportResult(false, "Nie udało się odczytać danych z kodu QR.")
+        }
+    }
+
+    private fun decodeAndDecompress(base64Data: String): String {
+        val compressed = android.util.Base64.decode(
+            base64Data,
+            android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE,
+        )
+        val input = GZIPInputStream(ByteArrayInputStream(compressed))
+        return input.bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }
+
     companion object {
         private const val DEMO_GROUP_ID = "ALFA-1234-5678-9012"
+        private const val SYNC_PREFIX = "BCSYNC1:"
+        private const val SESSION_ROW_ID = 1
+    }
+
+    private suspend fun restoreLoggedUserFromSession() {
+        val session = appDao.getUserSession() ?: return
+        val user = appDao.getAllUsers()
+            .map { it.toUserAccount() }
+            .firstOrNull { it.id == session.userId }
+            ?: return
+
+        withContext(Dispatchers.Main.immediate) {
+            currentUser = user
+            authError = null
+            SessionRepository.setUser(user)
+        }
     }
 }

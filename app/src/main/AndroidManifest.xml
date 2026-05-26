@@ -36,7 +36,6 @@
         <receiver
             android:name=".data.ble.BleScanReceiver"
             android:exported="true"
-            android:permission="TODO"
             tools:ignore="ExportedReceiver">
             <intent-filter>
                 <action android:name="com.project.blue_command.ACTION_BLE_SCAN_RESULT" />

@@ -15,6 +15,9 @@ data class CommandMessageEntity(
     val bleMsgId: Int? = null,
     val expectedAcks: Int = 0,
     val receivedAcks: Int = 0,
+    val expectedAckMemberIds: List<String> = emptyList(),
+    val acknowledgedMemberIds: List<String> = emptyList(),
+    val isFailed: Boolean = false,
 )
 
 @Entity(tableName = "combat_groups")
@@ -31,6 +34,13 @@ data class UserEntity(
     val username: String,
     val password: String,
     val roleName: String,
+)
+
+@Entity(tableName = "user_session")
+data class UserSessionEntity(
+    @PrimaryKey val id: Int = 1,
+    val userId: String,
+    val loggedAtMillis: Long,
 )
 
 class StringListConverter {

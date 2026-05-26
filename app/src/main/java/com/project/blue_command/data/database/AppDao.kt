@@ -33,8 +33,20 @@ interface AppDao {
     @Insert
     suspend fun insertUser(user: UserEntity)
 
+    @Insert(onConflict = OnConflictStrategy.Companion.REPLACE)
+    suspend fun upsertUser(user: UserEntity)
+
     @Query("SELECT * FROM users")
     suspend fun getAllUsers(): List<UserEntity>
+
+    @Insert(onConflict = OnConflictStrategy.Companion.REPLACE)
+    suspend fun upsertUserSession(session: UserSessionEntity)
+
+    @Query("SELECT * FROM user_session WHERE id = 1 LIMIT 1")
+    suspend fun getUserSession(): UserSessionEntity?
+
+    @Query("DELETE FROM user_session WHERE id = 1")
+    suspend fun clearUserSession()
 
     @Query("SELECT COUNT(*) FROM command_messages WHERE groupId = :groupId")
     suspend fun countCommandsForGroup(groupId: String): Int

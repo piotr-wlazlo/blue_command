@@ -4,11 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -22,7 +21,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.project.blue_command.logic.AuthController
@@ -55,16 +53,19 @@ fun SoldierScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(10.dp),
+                    .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
@@ -82,11 +83,13 @@ fun SoldierScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        LatestCommandPreviewCard(messages = receivedBleCommands)
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         ) {
             MainViewToggle(
                 selectedView = selectedSoldierView,
@@ -94,21 +97,26 @@ fun SoldierScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         ) {
-            Box(modifier = Modifier.padding(4.dp)) {
+            Box(modifier = Modifier.padding(6.dp)) {
                 when (selectedSoldierView) {
                     SoldierMainView.COMMANDS -> CommandScreen(
                         controller = commandController,
                         availableCommands = SOLDIER_ALLOWED_COMMANDS
                     )
-                    SoldierMainView.INBOX -> CommandsInboxScreen(messages = receivedBleCommands)
+                    SoldierMainView.INBOX -> CommandsInboxScreen(
+                        messages = receivedBleCommands,
+                        resolveUsername = { memberId ->
+                            authController.getUserById(memberId)?.username ?: memberId
+                        },
+                    )
                 }
             }
         }

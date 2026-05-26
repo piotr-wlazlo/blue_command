@@ -66,6 +66,11 @@ class BleBroadcastService(private val context: Context
     // Nie uwzgledniam grupy, bo zdeszyfrowany komunikat jest wystarczajacą odpowiedzią
     // czy komenda zostala nadana przez kogos z tej samej grupy
     override suspend fun broadcastPayload(payload: ByteArray) {
+        if (payload.size > 24) {
+            Log.e("BLE_ERROR", "Payload BLE jest za duży (${payload.size} B), max 24 B.")
+            return
+        }
+
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)

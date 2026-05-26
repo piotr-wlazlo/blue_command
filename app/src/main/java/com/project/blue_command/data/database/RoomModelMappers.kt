@@ -28,6 +28,9 @@ internal fun CommandMessageEntity.toCommandMessage(): CommandMessage =
         bleMsgId = bleMsgId,
         expectedAcks = expectedAcks,
         receivedAcks = receivedAcks,
+        expectedAckMemberIds = expectedAckMemberIds,
+        acknowledgedMemberIds = acknowledgedMemberIds,
+        isFailed = isFailed,
     )
 
 internal fun CommandMessage.toEntity(): CommandMessageEntity =
@@ -41,4 +44,7 @@ internal fun CommandMessage.toEntity(): CommandMessageEntity =
         bleMsgId = bleMsgId,
         expectedAcks = expectedAcks,
         receivedAcks = receivedAcks,
+        expectedAckMemberIds = expectedAckMemberIds,
+        acknowledgedMemberIds = acknowledgedMemberIds,
+        isFailed = isFailed,
     )
