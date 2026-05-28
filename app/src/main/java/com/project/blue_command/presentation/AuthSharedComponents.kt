@@ -313,12 +313,12 @@ fun LatestCommandPreviewCard(messages: List<CommandMessage>) {
 
 @Composable
 fun DatabaseSyncQrCard(
-    group: CombatGroup,
-    members: List<UserAccount>,
+    groups: List<CombatGroup>,
+    users: List<UserAccount>,
     messages: List<CommandMessage>,
 ) {
-    val syncData = remember(group, members, messages) {
-        buildSyncQrPayload(group = group, members = members, messages = messages)
+    val syncData = remember(groups, users, messages) {
+        buildSyncQrPayload(groups = groups, users = users, messages = messages)
     }
     val qrImage = remember(syncData.payload) { createQrImageBitmap(syncData.payload, size = 500) }
 
@@ -357,7 +357,12 @@ fun DatabaseSyncQrCard(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Zawiera: grupę, członków i ostatnie komendy.",
+                text = "Zawiera: pełną bazę (użytkownicy, grupy, komendy).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            )
+            Text(
+                text = "Grupy: ${syncData.includedGroups}/${groups.size}, użytkownicy: ${syncData.includedUsers}/${users.size}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
             )
@@ -410,28 +415,37 @@ private fun formatUserList(memberIds: List<String>, resolveUsername: (String) ->
 
 private data class SyncQrData(
     val payload: String,
+    val includedUsers: Int,
+    val includedGroups: Int,
     val includedCommands: Int,
     val truncated: Boolean,
 )
 
 private fun buildSyncQrPayload(
-    group: CombatGroup,
-    members: List<UserAccount>,
+    groups: List<CombatGroup>,
+    users: List<UserAccount>,
     messages: List<CommandMessage>,
 ): SyncQrData {
     val sortedMessages = messages.sortedByDescending { it.sentAtMillis }
     var commandLimit = minOf(sortedMessages.size, 24)
     while (commandLimit >= 0) {
         val json = JSONObject().apply {
-            put("v", 1)
+            put("v", 2)
             put("ts", System.currentTimeMillis())
-            put("g", JSONObject().apply {
-                put("id", group.id)
-                put("n", group.name)
-                put("k", group.groupKeyBase64)
+            put("g", JSONArray().apply {
+                groups.forEach { group ->
+                    put(JSONObject().apply {
+                        put("id", group.id)
+                        put("n", group.name)
+                        put("k", group.groupKeyBase64)
+                        put("m", JSONArray().apply {
+                            group.memberIds.forEach { memberId -> put(memberId) }
+                        })
+                    })
+                }
             })
             put("u", JSONArray().apply {
-                members.forEach { member ->
+                users.forEach { member ->
                     put(JSONObject().apply {
                         put("id", member.id)
                         put("un", member.username)
@@ -446,9 +460,16 @@ private fun buildSyncQrPayload(
                         put("sid", message.senderId)
                         put("sun", message.senderUsername)
                         put("cmd", message.commandLabel)
+                        put("gid", message.groupId)
                         put("t", message.sentAtMillis)
                         put("exp", message.expectedAcks)
                         put("ack", message.receivedAcks)
+                        put("eam", JSONArray().apply {
+                            message.expectedAckMemberIds.forEach { put(it) }
+                        })
+                        put("am", JSONArray().apply {
+                            message.acknowledgedMemberIds.forEach { put(it) }
+                        })
                         put("f", message.isFailed)
                     })
                 }
@@ -460,6 +481,8 @@ private fun buildSyncQrPayload(
         if (qrPayload.length <= 2500 || commandLimit == 0) {
             return SyncQrData(
                 payload = qrPayload,
+                includedUsers = users.size,
+                includedGroups = groups.size,
                 includedCommands = commandLimit,
                 truncated = commandLimit < sortedMessages.size,
             )
@@ -467,7 +490,13 @@ private fun buildSyncQrPayload(
         commandLimit--
     }
 
-    return SyncQrData(payload = "BCSYNC1:", includedCommands = 0, truncated = true)
+    return SyncQrData(
+        payload = "BCSYNC1:",
+        includedUsers = users.size,
+        includedGroups = groups.size,
+        includedCommands = 0,
+        truncated = true,
+    )
 }
 
 private fun compressToBase64(raw: String): String {

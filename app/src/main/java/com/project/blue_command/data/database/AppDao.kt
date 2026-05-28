@@ -21,11 +21,17 @@ interface AppDao {
     )
     fun getCommandsForGroup(groupId: String): Flow<List<CommandMessageEntity>>
 
+    @Query("SELECT * FROM command_messages ORDER BY sentAtMillis DESC")
+    suspend fun getAllCommands(): List<CommandMessageEntity>
+
     @Insert(onConflict = OnConflictStrategy.Companion.REPLACE)
     suspend fun insertGroup(group: GroupEntity)
 
     @Query("SELECT * FROM combat_groups")
     suspend fun getAllGroups(): List<GroupEntity>
+
+    @Query("DELETE FROM combat_groups")
+    suspend fun clearAllGroups()
 
     @Query("SELECT * FROM combat_groups WHERE id = :id LIMIT 1")
     suspend fun getGroupById(id: String): GroupEntity?
@@ -62,4 +68,7 @@ interface AppDao {
 
     @Query("UPDATE command_messages SET receivedAcks = :receivedAcks WHERE id = :id")
     suspend fun updateCommandReceivedAcks(id: String, receivedAcks: Int)
+
+    @Query("DELETE FROM command_messages")
+    suspend fun clearAllCommands()
 }

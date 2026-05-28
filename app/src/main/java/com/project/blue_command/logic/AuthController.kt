@@ -14,6 +14,7 @@ import com.project.blue_command.data.database.CommandMessageEntity
 import com.project.blue_command.data.database.UserEntity
 import com.project.blue_command.data.database.UserSessionEntity
 import com.project.blue_command.data.database.toCombatGroup
+import com.project.blue_command.data.database.toCommandMessage
 import com.project.blue_command.data.database.toEntity
 import com.project.blue_command.data.database.toUserAccount
 import com.project.blue_command.data.database.toUserEntity
@@ -27,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.util.UUID
@@ -164,6 +166,10 @@ class AuthController(application: Application) : AndroidViewModel(application) {
     }
 
     fun getSoldiers(): List<UserAccount> = usersCache.filter { it.role == UserRole.SOLDIER }
+    fun getAllUsersSnapshot(): List<UserAccount> = usersCache.toList()
+    fun getAllCommandsSnapshot(): List<CommandMessage> = runBlocking(Dispatchers.IO) {
+        appDao.getAllCommands().map { it.toCommandMessage() }
+    }
 
     fun getDeviceAssignedToSoldier(soldierId: String): CombatDevice? =
         devices.firstOrNull { it.assignedSoldierId == soldierId }
@@ -174,6 +180,7 @@ class AuthController(application: Application) : AndroidViewModel(application) {
             authError = "Nazwa grupy nie może być pusta."
             return false
         }
+        val creatorId = currentUser?.id
         viewModelScope.launch(Dispatchers.IO) {
             val newSecretKey = encryptionManager.generateNewGroupKeyBase64()
             appDao.insertGroup(
@@ -181,7 +188,7 @@ class AuthController(application: Application) : AndroidViewModel(application) {
                     id = UUID.randomUUID().toString(),
                     name = name,
                     groupKeyBase64 = newSecretKey,
-                    memberIds = emptyList(),
+                    memberIds = creatorId?.let { listOf(it) } ?: emptyList(),
                 ),
             )
             refreshGroupsFromDb()
@@ -192,10 +199,21 @@ class AuthController(application: Application) : AndroidViewModel(application) {
 
     fun assignSoldierToGroup(soldierId: String, groupId: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            val groups = appDao.getAllGroups()
+            groups.forEach { existingGroup ->
+                if (existingGroup.id != groupId && existingGroup.memberIds.contains(soldierId)) {
+                    appDao.insertGroup(
+                        existingGroup.copy(
+                            memberIds = existingGroup.memberIds.filter { it != soldierId },
+                        ),
+                    )
+                }
+            }
             val entity = appDao.getGroupById(groupId) ?: return@launch
-            if (entity.memberIds.contains(soldierId)) return@launch
-            val updated = entity.copy(memberIds = entity.memberIds + soldierId)
-            appDao.insertGroup(updated)
+            if (!entity.memberIds.contains(soldierId)) {
+                val updated = entity.copy(memberIds = entity.memberIds + soldierId)
+                appDao.insertGroup(updated)
+            }
             refreshGroupsFromDb()
         }
     }
@@ -260,95 +278,246 @@ class AuthController(application: Application) : AndroidViewModel(application) {
         return try {
             val jsonString = decodeAndDecompress(compressedContent)
             val root = JSONObject(jsonString)
-            if (root.optInt("v", -1) != 1) {
-                return SyncImportResult(false, "Nieobsługiwana wersja pakietu synchronizacji.")
+            when (root.optInt("v", -1)) {
+                1 -> importLegacyGroupSync(root)
+                2 -> importFullDatabaseSync(root)
+                else -> SyncImportResult(false, "Nieobsługiwana wersja pakietu synchronizacji.")
             }
-
-            val groupObject = root.optJSONObject("g")
-                ?: return SyncImportResult(false, "Brak danych grupy w kodzie QR.")
-            val groupId = groupObject.optString("id")
-            val groupName = groupObject.optString("n")
-            val groupKey = groupObject.optString("k")
-            if (groupId.isBlank() || groupName.isBlank() || groupKey.isBlank()) {
-                return SyncImportResult(false, "Niekompletne dane grupy w kodzie QR.")
-            }
-
-            val usersArray = root.optJSONArray("u")
-            val existingUsers = appDao.getAllUsers().associateBy { it.id }
-            val importedMemberIds = mutableListOf<String>()
-            var importedUsersCount = 0
-
-            if (usersArray != null) {
-                for (index in 0 until usersArray.length()) {
-                    val userObj = usersArray.optJSONObject(index) ?: continue
-                    val userId = userObj.optString("id")
-                    val username = userObj.optString("un")
-                    val roleName = userObj.optString("r")
-                    if (userId.isBlank() || username.isBlank() || roleName.isBlank()) continue
-
-                    val role = runCatching { UserRole.valueOf(roleName) }.getOrNull() ?: continue
-                    val existing = existingUsers[userId]
-                    val password = existing?.password ?: "synced-user"
-                    appDao.upsertUser(
-                        UserEntity(
-                            id = userId,
-                            username = username,
-                            password = password,
-                            roleName = role.name,
-                        ),
-                    )
-                    importedUsersCount++
-                    importedMemberIds.add(userId)
-                }
-            }
-
-            appDao.insertGroup(
-                GroupEntity(
-                    id = groupId,
-                    name = groupName,
-                    groupKeyBase64 = groupKey,
-                    memberIds = importedMemberIds.distinct(),
-                ),
-            )
-
-            val commandsArray = root.optJSONArray("c")
-            var importedCommandsCount = 0
-            if (commandsArray != null) {
-                for (index in 0 until commandsArray.length()) {
-                    val commandObj = commandsArray.optJSONObject(index) ?: continue
-                    val commandId = commandObj.optString("id").ifBlank { UUID.randomUUID().toString() }
-                    val senderId = commandObj.optString("sid").ifBlank { "unknown" }
-                    val senderUsername = commandObj.optString("sun").ifBlank { "unknown" }
-                    val commandLabel = commandObj.optString("cmd").ifBlank { continue }
-                    val sentAt = commandObj.optLong("t", System.currentTimeMillis())
-                    val expectedAcks = commandObj.optInt("exp", 0)
-                    val receivedAcks = commandObj.optInt("ack", 0)
-                    val isFailed = commandObj.optBoolean("f", false)
-
-                    appDao.insertCommand(
-                        CommandMessageEntity(
-                            id = commandId,
-                            senderId = senderId,
-                            senderUsername = senderUsername,
-                            commandLabel = commandLabel,
-                            sentAtMillis = sentAt,
-                            groupId = groupId,
-                            expectedAcks = expectedAcks,
-                            receivedAcks = receivedAcks,
-                            isFailed = isFailed,
-                        ),
-                    )
-                    importedCommandsCount++
-                }
-            }
-
-            SyncImportResult(
-                success = true,
-                message = "Synchronizacja zakończona. Użytkownicy: $importedUsersCount, komendy: $importedCommandsCount.",
-            )
         } catch (_: Exception) {
             SyncImportResult(false, "Nie udało się odczytać danych z kodu QR.")
         }
+    }
+
+    private suspend fun importFullDatabaseSync(root: JSONObject): SyncImportResult {
+        val usersArray = root.optJSONArray("u") ?: JSONArray()
+        val groupsArray = root.optJSONArray("g") ?: JSONArray()
+        val commandsArray = root.optJSONArray("c") ?: JSONArray()
+
+        val existingUsers = appDao.getAllUsers().associateBy { it.id }
+        val roleByUserId = existingUsers.mapValuesTo(mutableMapOf()) { (_, userEntity) ->
+            runCatching { UserRole.valueOf(userEntity.roleName) }.getOrDefault(UserRole.SOLDIER)
+        }
+
+        var importedUsersCount = 0
+        for (index in 0 until usersArray.length()) {
+            val userObj = usersArray.optJSONObject(index) ?: continue
+            val userId = userObj.optString("id")
+            val username = userObj.optString("un")
+            val roleName = userObj.optString("r")
+            if (userId.isBlank() || username.isBlank() || roleName.isBlank()) continue
+            val role = runCatching { UserRole.valueOf(roleName) }.getOrNull() ?: continue
+            roleByUserId[userId] = role
+            val password = existingUsers[userId]?.password ?: "synced-user"
+            appDao.upsertUser(
+                UserEntity(
+                    id = userId,
+                    username = username,
+                    password = password,
+                    roleName = role.name,
+                ),
+            )
+            importedUsersCount++
+        }
+
+        appDao.clearAllCommands()
+        appDao.clearAllGroups()
+
+        val parsedGroups = mutableListOf<GroupEntity>()
+        val lastGroupIndexBySoldierId = mutableMapOf<String, Int>()
+
+        for (index in 0 until groupsArray.length()) {
+            val groupObj = groupsArray.optJSONObject(index) ?: continue
+            val groupId = groupObj.optString("id")
+            val groupName = groupObj.optString("n")
+            val groupKey = groupObj.optString("k")
+            if (groupId.isBlank() || groupName.isBlank() || groupKey.isBlank()) continue
+            val memberIds = groupObj.optJSONArray("m")
+                ?.toStringList()
+                ?.filter { it.isNotBlank() }
+                ?.distinct()
+                ?: emptyList()
+            val groupEntity = GroupEntity(
+                id = groupId,
+                name = groupName,
+                groupKeyBase64 = groupKey,
+                memberIds = memberIds,
+            )
+            parsedGroups.add(groupEntity)
+            memberIds.forEach { memberId ->
+                if (roleByUserId[memberId] == UserRole.SOLDIER) {
+                    lastGroupIndexBySoldierId[memberId] = parsedGroups.lastIndex
+                }
+            }
+        }
+
+        parsedGroups.forEachIndexed { index, groupEntity ->
+            val normalizedMembers = groupEntity.memberIds.filter { memberId ->
+                if (roleByUserId[memberId] == UserRole.SOLDIER) {
+                    lastGroupIndexBySoldierId[memberId] == index
+                } else {
+                    true
+                }
+            }
+            appDao.insertGroup(groupEntity.copy(memberIds = normalizedMembers))
+        }
+        val importedGroupsCount = parsedGroups.size
+
+        var importedCommandsCount = 0
+        for (index in 0 until commandsArray.length()) {
+            val commandObj = commandsArray.optJSONObject(index) ?: continue
+            val commandId = commandObj.optString("id").ifBlank { UUID.randomUUID().toString() }
+            val senderId = commandObj.optString("sid").ifBlank { "unknown" }
+            val senderUsername = commandObj.optString("sun").ifBlank { "unknown" }
+            val commandLabel = commandObj.optString("cmd").ifBlank { continue }
+            val sentAt = commandObj.optLong("t", System.currentTimeMillis())
+            val groupId = commandObj.optString("gid")
+            if (groupId.isBlank()) continue
+            val expectedAcks = commandObj.optInt("exp", 0)
+            val receivedAcks = commandObj.optInt("ack", 0)
+            val isFailed = commandObj.optBoolean("f", false)
+            val expectedAckMemberIds = commandObj.optJSONArray("eam")
+                ?.toStringList()
+                ?.filter { it.isNotBlank() }
+                ?: emptyList()
+            val acknowledgedMemberIds = commandObj.optJSONArray("am")
+                ?.toStringList()
+                ?.filter { it.isNotBlank() }
+                ?: emptyList()
+
+            appDao.insertCommand(
+                CommandMessageEntity(
+                    id = commandId,
+                    senderId = senderId,
+                    senderUsername = senderUsername,
+                    commandLabel = commandLabel,
+                    sentAtMillis = sentAt,
+                    groupId = groupId,
+                    expectedAcks = expectedAcks,
+                    receivedAcks = receivedAcks,
+                    expectedAckMemberIds = expectedAckMemberIds,
+                    acknowledgedMemberIds = acknowledgedMemberIds,
+                    isFailed = isFailed,
+                ),
+            )
+            importedCommandsCount++
+        }
+
+        return SyncImportResult(
+            success = true,
+            message = "Pełna synchronizacja zakończona. Użytkownicy: $importedUsersCount, grupy: $importedGroupsCount, komendy: $importedCommandsCount.",
+        )
+    }
+
+    private suspend fun importLegacyGroupSync(root: JSONObject): SyncImportResult {
+        val groupObject = root.optJSONObject("g")
+            ?: return SyncImportResult(false, "Brak danych grupy w kodzie QR.")
+        val groupId = groupObject.optString("id")
+        val groupName = groupObject.optString("n")
+        val groupKey = groupObject.optString("k")
+        if (groupId.isBlank() || groupName.isBlank() || groupKey.isBlank()) {
+            return SyncImportResult(false, "Niekompletne dane grupy w kodzie QR.")
+        }
+
+        val memberIdsFromPayload = groupObject.optJSONArray("m")
+            ?.toStringList()
+            ?.filter { it.isNotBlank() }
+            ?.distinct()
+            ?: emptyList()
+
+        val usersArray = root.optJSONArray("u")
+        val existingUsers = appDao.getAllUsers().associateBy { it.id }
+        val roleByUserId = existingUsers.mapValuesTo(mutableMapOf()) { (_, userEntity) ->
+            runCatching { UserRole.valueOf(userEntity.roleName) }.getOrDefault(UserRole.SOLDIER)
+        }
+        val importedMemberIds = mutableListOf<String>()
+        var importedUsersCount = 0
+        if (usersArray != null) {
+            for (index in 0 until usersArray.length()) {
+                val userObj = usersArray.optJSONObject(index) ?: continue
+                val userId = userObj.optString("id")
+                val username = userObj.optString("un")
+                val roleName = userObj.optString("r")
+                if (userId.isBlank() || username.isBlank() || roleName.isBlank()) continue
+
+                val role = runCatching { UserRole.valueOf(roleName) }.getOrNull() ?: continue
+                roleByUserId[userId] = role
+                val password = existingUsers[userId]?.password ?: "synced-user"
+                appDao.upsertUser(
+                    UserEntity(
+                        id = userId,
+                        username = username,
+                        password = password,
+                        roleName = role.name,
+                    ),
+                )
+                importedUsersCount++
+                importedMemberIds.add(userId)
+            }
+        }
+
+        val effectiveMemberIds = if (memberIdsFromPayload.isNotEmpty()) {
+            memberIdsFromPayload
+        } else {
+            importedMemberIds.distinct()
+        }
+
+        appDao.insertGroup(
+            GroupEntity(
+                id = groupId,
+                name = groupName,
+                groupKeyBase64 = groupKey,
+                memberIds = effectiveMemberIds,
+            ),
+        )
+
+        val allGroups = appDao.getAllGroups()
+        allGroups
+            .asSequence()
+            .filter { it.id != groupId }
+            .forEach { existingGroup ->
+                val updatedMembers = existingGroup.memberIds.filterNot { memberId ->
+                    memberId in effectiveMemberIds && roleByUserId[memberId] == UserRole.SOLDIER
+                }
+                if (updatedMembers.size != existingGroup.memberIds.size) {
+                    appDao.insertGroup(existingGroup.copy(memberIds = updatedMembers))
+                }
+            }
+
+        val commandsArray = root.optJSONArray("c")
+        var importedCommandsCount = 0
+        if (commandsArray != null) {
+            for (index in 0 until commandsArray.length()) {
+                val commandObj = commandsArray.optJSONObject(index) ?: continue
+                val commandId = commandObj.optString("id").ifBlank { UUID.randomUUID().toString() }
+                val senderId = commandObj.optString("sid").ifBlank { "unknown" }
+                val senderUsername = commandObj.optString("sun").ifBlank { "unknown" }
+                val commandLabel = commandObj.optString("cmd").ifBlank { continue }
+                val sentAt = commandObj.optLong("t", System.currentTimeMillis())
+                val expectedAcks = commandObj.optInt("exp", 0)
+                val receivedAcks = commandObj.optInt("ack", 0)
+                val isFailed = commandObj.optBoolean("f", false)
+
+                appDao.insertCommand(
+                    CommandMessageEntity(
+                        id = commandId,
+                        senderId = senderId,
+                        senderUsername = senderUsername,
+                        commandLabel = commandLabel,
+                        sentAtMillis = sentAt,
+                        groupId = groupId,
+                        expectedAcks = expectedAcks,
+                        receivedAcks = receivedAcks,
+                        isFailed = isFailed,
+                    ),
+                )
+                importedCommandsCount++
+            }
+        }
+
+        return SyncImportResult(
+            success = true,
+            message = "Synchronizacja zakończona. Użytkownicy: $importedUsersCount, komendy: $importedCommandsCount.",
+        )
     }
 
     private fun decodeAndDecompress(base64Data: String): String {
@@ -379,4 +548,12 @@ class AuthController(application: Application) : AndroidViewModel(application) {
             SessionRepository.setUser(user)
         }
     }
+}
+
+private fun JSONArray.toStringList(): List<String> {
+    val result = mutableListOf<String>()
+    for (index in 0 until length()) {
+        result.add(optString(index))
+    }
+    return result
 }

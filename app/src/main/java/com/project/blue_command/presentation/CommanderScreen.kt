@@ -1,5 +1,8 @@
 package com.project.blue_command.presentation
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,8 +30,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.project.blue_command.logic.AuthController
 import com.project.blue_command.logic.CommandController
 import com.project.blue_command.model.CombatGroup
@@ -39,9 +46,15 @@ fun CommanderScreen(authController: AuthController) {
     var newGroupName by remember { mutableStateOf("") }
     var selectedGroupId by remember { mutableStateOf<String?>(null) }
     var isManageMode by remember { mutableStateOf(false) }
+    var isDatabaseSyncWindowVisible by remember { mutableStateOf(false) }
     val selectedGroup = selectedGroupId?.let { authController.getGroupById(it) }
 
-    if (selectedGroup == null) {
+    if (isDatabaseSyncWindowVisible) {
+        CommanderDatabaseSyncScreen(
+            authController = authController,
+            onBack = { isDatabaseSyncWindowVisible = false },
+        )
+    } else if (selectedGroup == null) {
         CommanderMainPanel(
             authController = authController,
             newGroupName = newGroupName,
@@ -49,6 +62,7 @@ fun CommanderScreen(authController: AuthController) {
             onGroupCreated = { created ->
                 if (created) newGroupName = ""
             },
+            onOpenDatabaseSync = { isDatabaseSyncWindowVisible = true },
             onGroupSelected = { groupId ->
                 selectedGroupId = groupId
                 isManageMode = false
@@ -80,6 +94,7 @@ private fun CommanderMainPanel(
     newGroupName: String,
     onNewGroupNameChanged: (String) -> Unit,
     onGroupCreated: (Boolean) -> Unit,
+    onOpenDatabaseSync: () -> Unit,
     onGroupSelected: (String) -> Unit
 ) {
     Column(
@@ -89,15 +104,25 @@ private fun CommanderMainPanel(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column {
-                Text("Panel dowódcy", style = MaterialTheme.typography.titleLarge)
-                Text("Tworzenie i podgląd grup")
+            Text("Panel dowódcy", style = MaterialTheme.typography.titleLarge)
+            Text("Tworzenie i podgląd grup")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onOpenDatabaseSync,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Panel sync") }
+                Button(
+                    onClick = { authController.logout() },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Wyloguj") }
             }
-            Button(onClick = { authController.logout() }) { Text("Wyloguj") }
         }
 
         Card(
@@ -169,26 +194,11 @@ private fun GroupDetailsScreen(
     onManageGroup: () -> Unit,
 ) {
     var selectedView by remember { mutableStateOf(SoldierMainView.COMMANDS) }
-    var isQrWindowVisible by remember { mutableStateOf(false) }
     val receivedBleCommands by commandController.receivedCommands.collectAsState()
-    val user = authController.currentUser ?: return
-    val groupMembers = remember(group, authController.groups) {
-        group.memberIds.mapNotNull { authController.getUserById(it) }
-    }
+    authController.currentUser ?: return
 
     LaunchedEffect(group) {
         commandController.setActiveGroup(group)
-    }
-
-    if (isQrWindowVisible) {
-        CommanderQrSyncScreen(
-            authController = authController,
-            group = group,
-            groupMembers = groupMembers,
-            messages = receivedBleCommands,
-            onBack = { isQrWindowVisible = false },
-        )
-        return
     }
 
     Column(
@@ -202,10 +212,7 @@ private fun GroupDetailsScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             TextButton(onClick = onBack) { Text("Powrót") }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { isQrWindowVisible = true }) { Text("Wyświetl kod") }
-                Button(onClick = { authController.logout() }) { Text("Wyloguj") }
-            }
+            Button(onClick = { authController.logout() }) { Text("Wyloguj") }
         }
 
         Card(
@@ -259,13 +266,29 @@ private fun GroupDetailsScreen(
 }
 
 @Composable
-private fun CommanderQrSyncScreen(
+private fun CommanderDatabaseSyncScreen(
     authController: AuthController,
-    group: CombatGroup,
-    groupMembers: List<com.project.blue_command.model.UserAccount>,
-    messages: List<com.project.blue_command.model.CommandMessage>,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    var syncMessage by remember { mutableStateOf("Zeskanuj kod QR, aby zaimportować pełną bazę lub pokaż własny kod żołnierzowi.") }
+    var importInProgress by remember { mutableStateOf(false) }
+
+    val scanner = remember(activity) {
+        activity?.let {
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            GmsBarcodeScanning.getClient(it, options)
+        }
+    }
+
+    val allUsers = authController.getAllUsersSnapshot()
+    val allGroups = authController.groups.toList()
+    val allCommands = authController.getAllCommandsSnapshot()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -286,18 +309,60 @@ private fun CommanderQrSyncScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text("Synchronizacja dla: ${group.name}", style = MaterialTheme.typography.titleSmall)
+                Text("Synchronizacja całej bazy", style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Pokaż ten kod żołnierzowi do importu danych.")
+                Text(syncMessage)
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (scanner == null) {
+                            syncMessage = "Nie można uruchomić skanera na tym urządzeniu."
+                            return@Button
+                        }
+                        importInProgress = true
+                        syncMessage = "Skanowanie kodu QR..."
+                        scanner.startScan()
+                            .addOnSuccessListener { barcode ->
+                                val rawPayload = barcode.rawValue
+                                if (rawPayload.isNullOrBlank()) {
+                                    importInProgress = false
+                                    syncMessage = "Kod QR jest pusty."
+                                } else {
+                                    authController.importSyncFromQr(rawPayload) { result ->
+                                        importInProgress = false
+                                        syncMessage = result.message
+                                    }
+                                }
+                            }
+                            .addOnCanceledListener {
+                                importInProgress = false
+                                syncMessage = "Skanowanie anulowane."
+                            }
+                            .addOnFailureListener { error ->
+                                importInProgress = false
+                                syncMessage = error.message ?: "Nie udało się zeskanować kodu QR."
+                            }
+                    },
+                    enabled = !importInProgress,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (importInProgress) "Trwa import..." else "Skanuj kod QR")
+                }
             }
         }
 
         DatabaseSyncQrCard(
-            group = group,
-            members = groupMembers,
-            messages = messages,
+            groups = allGroups,
+            users = allUsers,
+            messages = allCommands,
         )
     }
+}
+
+private fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
