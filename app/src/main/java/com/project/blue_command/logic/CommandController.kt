@@ -27,6 +27,8 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+
 class CommandController(
     application: Application,
     private val authController: AuthController
@@ -35,6 +37,7 @@ class CommandController(
     private val radioManager = TacticalRadioManager(application)
     private val appDao = LocalAppDatabase.getDatabase(application).appDao()
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     val receivedCommands: StateFlow<List<CommandMessage>> =
         SessionRepository.activeGroup
             .flatMapLatest { group ->

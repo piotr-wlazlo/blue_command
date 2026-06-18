@@ -36,6 +36,7 @@ class BleBroadcastServiceTest {
 
     @Before
     fun setUp() {
+        clearAllMocks()
         context = mockk(relaxed = true)
 
         every { context.getSystemService(BluetoothManager::class.java) } returns mockBluetoothManager
